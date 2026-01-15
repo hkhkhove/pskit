@@ -1,0 +1,19 @@
+[package]
+name = "pskit-webserver"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8.4", features = ["multipart"] }
+chrono = { version = "0.4.41", features = ["serde"] }
+pyo3 = { version = "0.25.1", features = ["auto-initialize"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
+sqlx = { version = "0.8.6", features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "chrono",
+    "json",
+] }
+tokio = { version = "1.47.1", features = ["full"] }
+tower-http = { version = "0.6.6", features = ["fs", "trace"] }

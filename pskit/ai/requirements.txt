@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+-f https://data.pyg.org/whl/torch-2.4.1+cpu.html
+torch==2.4.1+cpu
+biopython==1.84
+transformers==4.28.1
+fair-esm==2.0.0
+torchdrug==0.2.1
+numpy==1.24.4

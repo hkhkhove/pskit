@@ -1,0 +1,7 @@
+<svg viewBox="0 20 120 80" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
+    <!-- DNA Helix -->
+    <path d="M20 40C35 40 45 80 60 80C75 80 85 40 100 40" stroke="#94A3B8" stroke-width="6" stroke-linecap="round" opacity="0.3" />
+    <path d="M20 80C35 80 45 40 60 40C75 40 85 80 100 80" stroke="#94A3B8" stroke-width="6" stroke-linecap="round" opacity="0.3" />
+    <!-- Protein Ribbon -->
+    <path d="M15 60C15 60 40 20 60 60C80 100 105 60 105 60" stroke="#0F52BA" stroke-width="8" stroke-linecap="round" fill="none" filter="url(#glow)" />
+</svg>

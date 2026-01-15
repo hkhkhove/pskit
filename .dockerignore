@@ -1,0 +1,19 @@
+.git
+**/.git
+.vscode
+.DS_Store
+
+# Node
+**/node_modules/
+webpage/dist/
+
+# Rust
+**/target/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+
+# Large runtime/output data (not needed for image build)
+tasks/
+uploads/

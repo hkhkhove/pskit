@@ -1,0 +1,12 @@
+model_parameters/
+lib/
+.vscode/
+tasks/
+webserver/target/
+pskit/toolkit/target/
+test/
+.code-workspace
+.DS_Store
+*.tar
+*.tar.gz
+__pycache__/

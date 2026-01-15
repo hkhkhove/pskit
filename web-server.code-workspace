@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "webpage"
+		},
+		{
+			"path": "webserver"
+		},
+		{
+			"path": "pskit/ai"
+		}
+	],
+	"settings": {}
+}

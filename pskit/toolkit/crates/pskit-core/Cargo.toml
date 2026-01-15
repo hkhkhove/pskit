@@ -1,0 +1,15 @@
+[package]
+name = "pskit-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pdbtbx = { version = "0.12", default-features = false, features = [
+    "compression",
+    "rstar",
+] }
+rstar = "0.12"
+wide = "0.8"

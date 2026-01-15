@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["crates/pskit-core", "crates/pskit-wasm"]
+
+[patch.crates-io]
+# pdbtbx = { path = "crates/pdbtbx-0.12.0" }
