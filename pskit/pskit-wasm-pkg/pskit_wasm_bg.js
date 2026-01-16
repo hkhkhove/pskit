@@ -114,10 +114,6 @@ function passStringToWasm0(arg, malloc, realloc) {
     return ptr;
 }
 
-function isLikeNone(x) {
-    return x === undefined || x === null;
-}
-
 function takeFromExternrefTable0(idx) {
     const value = wasm.__wbindgen_externrefs.get(idx);
     wasm.__externref_table_dealloc(idx);
@@ -125,22 +121,20 @@ function takeFromExternrefTable0(idx) {
 }
 /**
  * @param {Uint8Array} input
- * @param {string | null | undefined} chain_id
+ * @param {number} cutoff
  * @param {string} format
- * @returns {ContactMap}
+ * @returns {BindingPairs}
  */
-export function d_map(input, chain_id, format) {
+export function annotate_binding_pairs(input, cutoff, format) {
     const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    var ptr1 = isLikeNone(chain_id) ? 0 : passStringToWasm0(chain_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    var len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.d_map(ptr0, len0, ptr1, len1, ptr2, len2);
+    const ptr1 = passStringToWasm0(format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.annotate_binding_pairs(ptr0, len0, cutoff, ptr1, len1);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
-    return ContactMap.__wrap(ret[0]);
+    return BindingPairs.__wrap(ret[0]);
 }
 
 /**
@@ -177,24 +171,9 @@ export function split_by_chain(input, format) {
     return Chunks.__wrap(ret[0]);
 }
 
-/**
- * @param {Uint8Array} input
- * @param {number} cutoff
- * @param {string} format
- * @returns {BindingPairs}
- */
-export function annotate_binding_pairs(input, cutoff, format) {
-    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.annotate_binding_pairs(ptr0, len0, cutoff, ptr1, len1);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return BindingPairs.__wrap(ret[0]);
+function isLikeNone(x) {
+    return x === undefined || x === null;
 }
-
 /**
  * @param {Uint8Array} input
  * @param {string} chain_id
@@ -215,6 +194,26 @@ export function extract_fragment(input, chain_id, start, end, format) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return Fragment.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
+ * @param {string | null | undefined} chain_id
+ * @param {string} format
+ * @returns {ContactMap}
+ */
+export function d_map(input, chain_id, format) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    var ptr1 = isLikeNone(chain_id) ? 0 : passStringToWasm0(chain_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.d_map(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ContactMap.__wrap(ret[0]);
 }
 
 const BindingPairsFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -243,20 +242,20 @@ export class BindingPairs {
         wasm.__wbg_bindingpairs_free(ptr, 0);
     }
     /**
-     * @returns {Array<any>}
+     * Take the pairs array (consuming).
+     * @returns {Array<any> | undefined}
      */
-    pairs() {
-        const ret = wasm.bindingpairs_pairs(this.__wbg_ptr);
+    take_pairs() {
+        const ret = wasm.bindingpairs_take_pairs(this.__wbg_ptr);
         return ret;
     }
     /**
-     * @returns {Float64Array}
+     * Take the distances as Float64Array (consuming).
+     * @returns {Float64Array | undefined}
      */
-    distances() {
-        const ret = wasm.bindingpairs_distances(this.__wbg_ptr);
-        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
-        return v1;
+    take_distances() {
+        const ret = wasm.bindingpairs_take_distances(this.__wbg_ptr);
+        return ret;
     }
 }
 if (Symbol.dispose) BindingPairs.prototype[Symbol.dispose] = BindingPairs.prototype.free;
@@ -352,20 +351,20 @@ export class ContactMap {
         wasm.__wbg_contactmap_free(ptr, 0);
     }
     /**
-     * @returns {Array<any>}
+     * Take the values as a flat Float64Array (consuming, row-major order).
+     * @returns {Float64Array | undefined}
      */
-    axis() {
-        const ret = wasm.contactmap_axis(this.__wbg_ptr);
+    take_values() {
+        const ret = wasm.contactmap_take_values(this.__wbg_ptr);
         return ret;
     }
     /**
-     * @returns {Float64Array}
+     * Take the axis labels (consuming).
+     * @returns {Array<any> | undefined}
      */
-    values() {
-        const ret = wasm.contactmap_values(this.__wbg_ptr);
-        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
-        return v1;
+    take_axis() {
+        const ret = wasm.contactmap_take_axis(this.__wbg_ptr);
+        return ret;
     }
 }
 if (Symbol.dispose) ContactMap.prototype[Symbol.dispose] = ContactMap.prototype.free;
@@ -396,25 +395,25 @@ export class Fragment {
         wasm.__wbg_fragment_free(ptr, 0);
     }
     /**
+     * Take the bytes out as a JS Uint8Array (consuming, avoids double memory).
+     * Returns None if already taken.
+     * @returns {Uint8Array | undefined}
+     */
+    take_bytes() {
+        const ret = wasm.fragment_take_bytes(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @returns {number}
      */
-    end() {
+    get end() {
         const ret = wasm.chunks_len(this.__wbg_ptr);
         return ret;
     }
     /**
-     * @returns {Uint8Array}
-     */
-    bytes() {
-        const ret = wasm.fragment_bytes(this.__wbg_ptr);
-        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v1;
-    }
-    /**
      * @returns {number}
      */
-    start() {
+    get start() {
         const ret = wasm.fragment_start(this.__wbg_ptr);
         return ret;
     }
@@ -437,6 +436,11 @@ export function __wbg_new_e17d9f43105b08be() {
 
 export function __wbg_new_from_slice_92f4d78ca282a2d2(arg0, arg1) {
     const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
+    return ret;
+};
+
+export function __wbg_new_from_slice_fde3e31e670b38a6(arg0, arg1) {
+    const ret = new Float64Array(getArrayF64FromWasm0(arg0, arg1));
     return ret;
 };
 

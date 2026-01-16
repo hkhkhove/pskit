@@ -1,11 +1,9 @@
 use crate::config::Config;
 use crate::models::TaskStatus;
-use pyo3::{prelude::*, types::PyList};
 use sqlx::SqlitePool;
-use std::collections::HashMap;
+use std::process::Command;
 
-pub async fn process_task(form_data: HashMap<String, String>, db_pool: SqlitePool) {
-    let task_id = form_data.get("task_id").unwrap().clone();
+pub async fn process_task(task_id: String, db_pool: SqlitePool) {
     // 开始处理任务，更新任务状态为 Processing 并设置 start_time
     let start_time = chrono::Utc::now();
     if let Err(e) = sqlx::query("UPDATE tasks SET status = ?, start_time = ? WHERE id = ?")
@@ -19,9 +17,10 @@ pub async fn process_task(form_data: HashMap<String, String>, db_pool: SqlitePoo
         return;
     }
 
-    //运行python代码
-    let result: Result<Result<(), PyErr>, tokio::task::JoinError> =
-        tokio::task::spawn_blocking(move || run_pskit(form_data)).await;
+    // 运行 Python 脚本
+    let task_id_clone = task_id.clone();
+    let result: Result<Result<(), String>, tokio::task::JoinError> =
+        tokio::task::spawn_blocking(move || run_pskit(&task_id_clone)).await;
 
     // 根据结果更新数据库
     let end_time = chrono::Utc::now();
@@ -30,8 +29,8 @@ pub async fn process_task(form_data: HashMap<String, String>, db_pool: SqlitePoo
             .bind(TaskStatus::Completed)
             .bind(end_time)
             .bind(&task_id),
-        Ok(Err(py_err)) => {
-            let error_message = Some(format!("Python execution failed: {}", py_err));
+        Ok(Err(err_msg)) => {
+            let error_message = Some(format!("Python execution failed: {}", err_msg));
             sqlx::query("UPDATE tasks SET status = ?, end_time = ?, error_message = ? WHERE id = ?")
                 .bind(TaskStatus::Failed)
                 .bind(end_time)
@@ -53,25 +52,49 @@ pub async fn process_task(form_data: HashMap<String, String>, db_pool: SqlitePoo
     }
 }
 
-pub fn run_pskit(params: HashMap<String, String>) -> PyResult<()> {
-    Python::with_gil(|py| {
-        let sys = py.import("sys")?;
-        let path = sys.getattr("path")?;
-        let path_list = path.downcast::<PyList>()?;
+pub fn run_pskit(task_id: &str) -> Result<(), String> {
+    let home = Config::home();
 
-        let home = Config::home();
+    let form_data_path = home
+        .join("tasks")
+        .join("uploads")
+        .join(task_id)
+        .join("form_data.json");
 
-        path_list.insert(0, home.join("pskit").as_os_str())?;
+    if !form_data_path.exists() {
+        return Err(format!("form_data.json not found: {:?}", form_data_path));
+    }
 
-        let module = py.import("ai.run_pskit")?;
-        module.call_method("main", (params,), None)?;
+    // 运行 Python 脚本
+    let pskit_dir = home.join("pskit");
+    let output = Command::new("python")
+        .arg("-m")
+        .arg("ai.run_pskit")
+        .arg(&form_data_path)
+        .current_dir(&pskit_dir)
+        .output()
+        .map_err(|e| format!("Failed to execute python: {}", e))?;
+
+    // 打印 Python 输出（用于调试）
+    if !output.stdout.is_empty() {
+        println!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    if output.status.success() {
         Ok(())
-    })
+    } else {
+        Err(format!(
+            "Python script exited with code {:?}\nstderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
 }
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
 
     #[test]
@@ -80,24 +103,8 @@ mod tests {
 
         Config::init(PathBuf::from("/home/zh/p/pskit"), "0.0.0.0:10706".into(), 2).unwrap();
 
-        let mut params: HashMap<String, String> = HashMap::new();
-
-        params.insert(
-            "input_dir".into(),
-            "/home/zh/p/pskit/tasks/uploads/test".into(),
-        );
-        params.insert(
-            "output_dir".into(),
-            "/home/zh/p/pskit/tasks/results/test".into(),
-        );
-
-        params.insert("task_id".into(), "test".into());
-        params.insert("task_name".into(), "pred_bs".into());
-        params.insert("input_method".into(), "id".into());
-        params.insert("ids".into(), "".into());
-
-        if let Err(pyerr) = run_pskit(params) {
-            print!("{:?}", pyerr);
+        if let Err(err) = run_pskit("test") {
+            println!("Error: {}", err);
         }
     }
 }

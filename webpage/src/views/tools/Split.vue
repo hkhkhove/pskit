@@ -504,25 +504,21 @@ async function downloadAllAsZip() {
             <div>
                 <ul class="w-full rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
                     <li class="border-b border-gray-300 dark:border-gray-600">
-                        <div class="flex items-start p-4">
-                            <div class="flex items-center h-5">
-                                <input id="chain" type="radio" value="chain" v-model="split_type" class="h-4 w-4 accent-blue-600" />
-                            </div>
-                            <div class="ms-3">
-                                <label for="chain" class="text-sm font-medium text-gray-900 dark:text-gray-300"> Split by chain </label>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Separate all chains from the uploaded structures.</p>
-                            </div>
+                        <div class="flex items-center p-4">
+                            <input id="chain" type="radio" value="chain" v-model="split_type" class="h-4 w-4 accent-blue-600" />
+                            <label for="chain" class="ms-2 w-full">
+                                <span class="text-sm font-medium text-gray-900 dark:text-gray-300">Split by Chain</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400 block">Separate all chains from the uploaded structures.</span>
+                            </label>
                         </div>
                     </li>
                     <li>
-                        <div class="flex items-start p-4">
-                            <div class="flex items-center h-5">
-                                <input id="mol_type" type="radio" value="mol_type" v-model="split_type" class="h-4 w-4 accent-blue-600" />
-                            </div>
-                            <div class="ms-3">
-                                <label for="mol_type" class="text-sm font-medium text-gray-900 dark:text-gray-300"> Split by Molecule Type </label>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Separate proteins and nucleic acids from the uploaded structures.</p>
-                            </div>
+                        <div class="flex items-center p-4">
+                            <input id="mol_type" type="radio" value="mol_type" v-model="split_type" class="h-4 w-4 accent-blue-600" />
+                            <label for="mol_type" class="ms-2 w-full">
+                                <span class="text-sm font-medium text-gray-900 dark:text-gray-300"> Split by Molecule Type </span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400 block">Separate proteins and nucleic acids from the uploaded structures.</span>
+                            </label>
                         </div>
                     </li>
                 </ul>

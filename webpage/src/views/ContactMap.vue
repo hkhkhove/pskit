@@ -374,18 +374,18 @@ function clamp01(x) {
     return x;
 }
 
-// Sequential colormap: Viridis (matplotlib)
+// Sequential colormap: Viridis (matplotlib) - reversed
 // Keep the same number of stops for smooth gradients.
 const VIRIDIS_STOPS = [
-    { t: 0.0, c: [68, 1, 84] },
-    { t: 0.125, c: [72, 40, 120] },
-    { t: 0.25, c: [62, 73, 137] },
-    { t: 0.375, c: [49, 104, 142] },
+    { t: 0.0, c: [253, 231, 37] },
+    { t: 0.125, c: [109, 205, 89] },
+    { t: 0.25, c: [53, 183, 121] },
+    { t: 0.375, c: [31, 158, 137] },
     { t: 0.5, c: [38, 130, 142] },
-    { t: 0.625, c: [31, 158, 137] },
-    { t: 0.75, c: [53, 183, 121] },
-    { t: 0.875, c: [109, 205, 89] },
-    { t: 1.0, c: [253, 231, 37] },
+    { t: 0.625, c: [49, 104, 142] },
+    { t: 0.75, c: [62, 73, 137] },
+    { t: 0.875, c: [72, 40, 120] },
+    { t: 1.0, c: [68, 1, 84] },
 ];
 
 function viridisColor(t) {

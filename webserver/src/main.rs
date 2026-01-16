@@ -314,7 +314,6 @@ async fn task_dispatcher(
     db_pool: SqlitePool,
     cpu_task_semaphore: Arc<Semaphore>,
     task_queue: Arc<Mutex<std::collections::VecDeque<String>>>,
-    home: PathBuf,
 ) {
     while let Some(task_id) = task_receiver.recv().await {
         // 获取信号量许可
@@ -337,40 +336,9 @@ async fn task_dispatcher(
         }
 
         let pool_clone = db_pool.clone();
-        let home_clone = home.clone();
 
         tokio::spawn(async move {
-            // 从文件读取form_data
-            let form_data_path = home_clone
-                .join("tasks")
-                .join("uploads")
-                .join(&task_id)
-                .join("form_data.json");
-            let form_data = match fs::read_to_string(form_data_path).await {
-                Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-                Err(e) => {
-                    let error_message = Some(format!("Task execution failed: {}", e));
-                    if let Err(db_err) = sqlx::query(
-                        "UPDATE tasks SET status = ?, end_time = ?, error_message = ? WHERE id = ?",
-                    )
-                    .bind(TaskStatus::Failed)
-                    .bind(chrono::Utc::now())
-                    .bind(error_message)
-                    .bind(&task_id)
-                    .execute(&pool_clone)
-                    .await
-                    {
-                        eprintln!(
-                            "Database error while updating failed task {}: {}",
-                            task_id, db_err
-                        );
-                    }
-                    return;
-                }
-            };
-
-            tasks::process_task(form_data, pool_clone).await;
-
+            tasks::process_task(task_id, pool_clone).await;
             drop(permit);
         });
     }
@@ -432,7 +400,6 @@ async fn main() {
         db_pool,
         cpu_task_semaphore,
         task_queue,
-        home.clone(),
     ));
 
     let api_routes = Router::new()

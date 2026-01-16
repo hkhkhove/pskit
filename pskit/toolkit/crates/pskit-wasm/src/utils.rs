@@ -50,19 +50,26 @@ impl Chunks {
 
 #[wasm_bindgen]
 pub struct Fragment {
-    bytes: Vec<u8>,
+    bytes: Option<Vec<u8>>,
     start: isize,
     end: isize,
 }
 
 #[wasm_bindgen]
 impl Fragment {
-    pub fn bytes(&self) -> Vec<u8> {
-        self.bytes.clone()
+    /// Take the bytes out as a JS Uint8Array (consuming, avoids double memory).
+    /// Returns None if already taken.
+    #[wasm_bindgen]
+    pub fn take_bytes(&mut self) -> Option<Uint8Array> {
+        self.bytes.take().map(|v| Uint8Array::from(v.as_slice()))
     }
+
+    #[wasm_bindgen(getter)]
     pub fn start(&self) -> isize {
         self.start
     }
+
+    #[wasm_bindgen(getter)]
     pub fn end(&self) -> isize {
         self.end
     }
@@ -70,47 +77,59 @@ impl Fragment {
 
 #[wasm_bindgen]
 pub struct ContactMap {
-    axis: Vec<String>,
-    values: Vec<f64>,
+    axis: Option<Vec<String>>,
+    values: Option<Vec<f64>>,
 }
 
 #[wasm_bindgen]
 impl ContactMap {
+    /// Take the axis labels (consuming).
     #[wasm_bindgen]
-    pub fn axis(&self) -> Array {
-        let arr = Array::new();
-        for res_name in &self.axis {
-            arr.push(&JsValue::from_str(res_name));
-        }
-        arr
+    pub fn take_axis(&mut self) -> Option<Array> {
+        self.axis.take().map(|axis| {
+            let arr = Array::new();
+            for res_name in axis {
+                arr.push(&JsValue::from_str(&res_name));
+            }
+            arr
+        })
     }
 
+    /// Take the values as a flat Float64Array (consuming, row-major order).
     #[wasm_bindgen]
-    pub fn values(&self) -> Vec<f64> {
-        self.values.clone()
+    pub fn take_values(&mut self) -> Option<js_sys::Float64Array> {
+        self.values
+            .take()
+            .map(|v| js_sys::Float64Array::from(v.as_slice()))
     }
 }
 
 #[wasm_bindgen]
 pub struct BindingPairs {
-    pairs: Vec<String>,
-    distances: Vec<f64>,
+    pairs: Option<Vec<String>>,
+    distances: Option<Vec<f64>>,
 }
 
 #[wasm_bindgen]
 impl BindingPairs {
+    /// Take the pairs array (consuming).
     #[wasm_bindgen]
-    pub fn pairs(&self) -> Array {
-        let arr = Array::new();
-        for pair in &self.pairs {
-            arr.push(&JsValue::from_str(pair));
-        }
-        arr
+    pub fn take_pairs(&mut self) -> Option<Array> {
+        self.pairs.take().map(|pairs| {
+            let arr = Array::new();
+            for pair in pairs {
+                arr.push(&JsValue::from_str(&pair));
+            }
+            arr
+        })
     }
 
+    /// Take the distances as Float64Array (consuming).
     #[wasm_bindgen]
-    pub fn distances(&self) -> Vec<f64> {
-        self.distances.clone()
+    pub fn take_distances(&mut self) -> Option<js_sys::Float64Array> {
+        self.distances
+            .take()
+            .map(|v| js_sys::Float64Array::from(v.as_slice()))
     }
 }
 
@@ -139,7 +158,11 @@ pub fn extract_fragment(
     let cursor = Cursor::new(input);
     let (bytes, start, end) = split::extract_fragment(cursor, chain_id, start, end, format)
         .map_err(|e| JsValue::from_str(&e))?;
-    Ok(Fragment { bytes, start, end })
+    Ok(Fragment {
+        bytes: Some(bytes),
+        start,
+        end,
+    })
 }
 
 #[wasm_bindgen]
@@ -149,8 +172,8 @@ pub fn d_map(input: &[u8], chain_id: Option<String>, format: &str) -> Result<Con
         contact::d_map(cursor, chain_id, format).map_err(|e| JsValue::from_str(&e))?;
 
     Ok(ContactMap {
-        axis,
-        values: values.into_iter().flatten().collect(),
+        axis: Some(axis),
+        values: Some(values.into_iter().flatten().collect()),
     })
 }
 
@@ -165,5 +188,8 @@ pub fn annotate_binding_pairs(
         .map_err(|e| JsValue::from_str(&e))?;
     let (pairs, distances): (Vec<String>, Vec<f64>) = pairs.into_iter().unzip();
 
-    Ok(BindingPairs { pairs, distances })
+    Ok(BindingPairs {
+        pairs: Some(pairs),
+        distances: Some(distances),
+    })
 }

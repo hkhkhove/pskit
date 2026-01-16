@@ -2,7 +2,6 @@ import pickle
 import os
 import traceback
 import shutil
-import gc
 
 import torch
 
@@ -63,9 +62,11 @@ def predict(input_dir, output_dir, target_type):
         try:
             prot_name, ext = os.path.splitext(os.path.basename(pdb_file))
             if not has_protein_chain(read_structure(pdb_file)):
-                error[prot_name] = "Not having protein chain"
+                error[prot_name + ext] = "Not having protein chain"
+            elif len(get_seq(pdb_file)[0]) > 1000:
+                error[prot_name + ext] = "Sequence length exceeds 1000 residues"
         except Exception as e:
-            error[prot_name] = str(e) + "\n" + traceback.format_exc()
+            error[prot_name + ext] = str(e) + "\n" + traceback.format_exc()
 
     pdb_files = [f for f in pdb_files if os.path.splitext(os.path.basename(f))[0] not in error]
     if pdb_files == []:
@@ -87,7 +88,7 @@ def predict(input_dir, output_dir, target_type):
             pkl_file = pdb_file.replace(ext, "_input.pkl")
 
             if not os.path.exists(pkl_file):
-                error[prot_name] = f"Feature file not found: {pkl_file}"
+                error[prot_name + ext] = f"Feature file not found: {pkl_file}"
                 continue
 
             with open(pkl_file, "rb") as f:
@@ -117,13 +118,7 @@ def predict(input_dir, output_dir, target_type):
                 shutil.copy2(pdb_file, output_structure)
 
         except Exception as e:
-            error[prot_name] = str(e) + "\n" + traceback.format_exc()
-
-    # 释放模型内存
-    del model
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+            error[prot_name + ext] = str(e) + "\n" + traceback.format_exc()
 
     return error
 

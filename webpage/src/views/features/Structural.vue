@@ -281,7 +281,7 @@ watch(
 </script>
 
 <template>
-    <div class="mx-auto py-8 px-4" :class="showResults && is_results_view ? 'max-w-6xl' : 'max-w-3xl'">
+    <div class="mx-auto py-8 px-4" :class="showResults && is_results_view ? 'max-w-full' : 'max-w-3xl'">
         <!-- Results View with Data Visualization (after completion) -->
         <div v-if="is_results_view && showResults" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <!-- Left: File Content / Table -->
@@ -291,7 +291,7 @@ watch(
 
                 <!-- DSSP Table -->
                 <div v-if="selectedFile && parsedDssp.length > 0" class="overflow-hidden">
-                    <h4 class="text-lg font-medium text-gray-900 dark:text-gray-200 mb-3">DSSP Secondary Structure <span class="text-[10px] font-semibold text-gray-500 dark:text-gray-400">[1]</span></h4>
+                    <h4 class="text-lg font-medium text-gray-900 dark:text-gray-200 mb-3">DSSP Secondary Structure</h4>
                     <div class="max-h-[600px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                             <thead class="bg-gray-50 dark:bg-gray-800 sticky top-0">
@@ -328,7 +328,7 @@ watch(
 
                 <!-- Rosetta Score Table -->
                 <div v-else-if="selectedFile && Object.keys(parsedRosetta).length > 0" class="overflow-hidden">
-                    <h4 class="text-lg font-medium text-gray-900 dark:text-gray-200 mb-3">Rosetta Energy Scores <span class="text-[10px] font-semibold text-gray-500 dark:text-gray-400">[2]</span></h4>
+                    <h4 class="text-lg font-medium text-gray-900 dark:text-gray-200 mb-3">Rosetta Energy Scores</h4>
                     <div class="max-h-[600px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                             <thead class="bg-gray-50 dark:bg-gray-800 sticky top-0">
@@ -374,26 +374,24 @@ watch(
                         <a :href="file.download_url" download class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" @click.stop> Download </a>
                     </div>
                 </div>
-
-                <!-- Error Items from error.json -->
-                <div v-if="Object.keys(errorItems).length > 0" class="m-4">
-                    <h4 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-3">Processing Errors</h4>
-                    <div class="space-y-2">
-                        <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
-                            <p class="text-sm text-red-800 dark:text-red-300">
-                                <span class="font-semibold">{{ filename }}:</span> {{ message }}
-                            </p>
-                        </div>
-                    </div>
+            </div>
+        </div>
+        <!-- Error Items from error.json -->
+        <div v-if="Object.keys(errorItems).length > 0 && is_results_view && showResults" class="m-4">
+            <h4 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-3">Processing Errors</h4>
+            <div class="space-y-2">
+                <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+                    <p class="text-sm text-red-800 dark:text-red-300">
+                        <span class="font-semibold">{{ filename }}:</span> {{ message }}
+                    </p>
                 </div>
             </div>
         </div>
-
         <!-- Task Status View (pending/processing/failed - uses TaskResult component) -->
-        <TaskResult v-else-if="is_results_view && !showResults" :task-id="task_id" task-name="Structural Feature Extraction" @completed="handleTaskCompleted" @failed="handleTaskFailed" />
+        <TaskResult v-if="is_results_view && !showResults" :task-id="task_id" task-name="Structural Feature Extraction" @completed="handleTaskCompleted" @failed="handleTaskFailed" />
 
         <!-- Form View -->
-        <form v-else @submit.prevent="handleSubmit" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
+        <form v-if="!is_results_view" @submit.prevent="handleSubmit" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
             <div class="flex w-full justify-start">
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Structural Feature Extraction</p>
             </div>
@@ -414,15 +412,13 @@ watch(
                             <div class="flex items-center h-5">
                                 <input id="dssp" type="checkbox" value="dssp" v-model="emp_feats" class="h-4 w-4 accent-blue-600" />
                             </div>
-                            <div class="ms-3">
-                                <label for="dssp" class="text-sm font-medium text-gray-900 dark:text-gray-300">
-                                    {{ featureDescriptions.dssp.name }}
-                                    <sup class="ml-1 text-[10px] font-semibold text-gray-500 dark:text-gray-400">[1]</sup>
-                                </label>
+                            <label for="dssp" class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                                {{ featureDescriptions.dssp.name }}
+                                <sup class="ml-1 text-[10px] font-semibold text-gray-500 dark:text-gray-400">[1]</sup>
                                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                     {{ featureDescriptions.dssp.description }}
                                 </p>
-                            </div>
+                            </label>
                         </div>
                     </li>
                     <li>
@@ -434,18 +430,20 @@ watch(
                                 <label for="rosetta" class="text-sm font-medium text-gray-900 dark:text-gray-300">
                                     {{ featureDescriptions.rosetta.name }}
                                     <sup class="ml-1 text-[10px] font-semibold text-gray-500 dark:text-gray-400">[2]</sup>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        {{ featureDescriptions.rosetta.description }}
+                                    </p>
                                 </label>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                    {{ featureDescriptions.rosetta.description }}
-                                </p>
 
                                 <!-- Rosetta Relax Option -->
                                 <div v-if="emp_feats.includes('rosetta')" class="mt-3 ml-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                    <div class="flex items-center">
+                                    <div class="flex items-start">
                                         <input id="rosetta_relax" type="checkbox" v-model="rosetta_relax" class="h-4 w-4 accent-blue-600" />
-                                        <label for="rosetta_relax" class="ms-2 text-sm font-medium text-gray-700 dark:text-gray-300"> Apply Structure Relaxation First </label>
+                                        <label for="rosetta_relax" class="ms-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            Apply Structure Relaxation First
+                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Use Rosetta FastRelax for energy minimization before scoring. This may take longer.</p>
+                                        </label>
                                     </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">Use Rosetta FastRelax for energy minimization before scoring. This may take longer.</p>
                                 </div>
                             </div>
                         </div>

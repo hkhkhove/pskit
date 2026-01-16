@@ -1,6 +1,7 @@
 import os
 import warnings
 import gc
+import subprocess
 import numpy as np
 import torch
 import json
@@ -65,11 +66,12 @@ def run(input_dir, output_dir, path):
         assert os.path.exists(foldseek), f"Foldseek not found: {foldseek}"
         assert os.path.exists(pdb_path), f"Pdb file not found: {pdb_path}"
         assert plddt_path is None or os.path.exists(plddt_path), f"Plddt file not found: {plddt_path}"
-        prot_name = os.path.basename(pdb_path).split(".")[0]
+        prot_name, ext = os.path.splitext(os.path.basename(pdb_path))
 
         tmp_save_path = f"get_struc_seq_{prot_name}.tsv"
-        cmd = f"{foldseek} structureto3didescriptor -v 0 --threads 1 --chain-name-mode 1 {pdb_path} {tmp_save_path}"
-        os.system(cmd)
+        subprocess.run([foldseek, "structureto3didescriptor", "-v", "0", "--threads", "1", "--chain-name-mode", "1", pdb_path, tmp_save_path], check=False)
+
+        assert os.path.exists(tmp_save_path), f"Foldseek failed to process {prot_name + ext}"
 
         seq_dict = {}
         name = os.path.basename(pdb_path)
@@ -123,17 +125,14 @@ def run(input_dir, output_dir, path):
 
             parsed_seqs = get_struc_seq(path["foldseek"], pdb_file, chains=[chain_id])
             seq, foldseek_seq, combined_seq = parsed_seqs[chain_id]
+
+            if len(seq) > 1000:
+                raise Exception("Sequence length exceeds 1000 residues")
+
             input = tokenizer(combined_seq, return_tensors="pt")
 
             inference(model, input.to(device), save_path)
         except Exception as e:
-            error[os.path.basename(pdb_file)] = str(e)
-
-    # 释放模型内存
-    del model
-    del tokenizer
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+            error[os.path.basename(pdb_file)] = f"SaProt failed: {str(e)}"
 
     return error

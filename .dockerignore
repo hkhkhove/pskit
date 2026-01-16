@@ -13,7 +13,8 @@ webpage/dist/
 # Python
 **/__pycache__/
 **/*.py[cod]
+pskit/ai/model_parameters/
 
-# Large runtime/output data (not needed for image build)
+# Large runtime/output data
 tasks/
 uploads/

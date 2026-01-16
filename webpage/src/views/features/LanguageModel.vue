@@ -141,19 +141,6 @@ function handleTaskFailed(error) {
     showResults.value = false;
 }
 
-function handleBack() {
-    task_id.value = "";
-    showResults.value = false;
-    resultFiles.value = [];
-    errorItems.value = {};
-    submissionError.value = null;
-
-    const q = { ...route.query };
-    delete q.view;
-    delete q.task_id;
-    router.replace({ query: q });
-}
-
 // 从 URL 恢复 task_id，支持用户保存链接稍后查看
 watch(
     () => route.query,

@@ -89,9 +89,9 @@ const handlers = {
         const out = wasm.extract_fragment(bytes, chain_id, start, end, format);
 
         try {
-            const outBytes = out.bytes();
-            const startOut = out.start();
-            const endOut = out.end();
+            const outBytes = out.take_bytes();
+            const startOut = out.start;
+            const endOut = out.end;
             assertUint8Array(outBytes, "result");
             return {
                 payload: { ok: true, kind: "fragment", bytes: outBytes, start: startOut, end: endOut },
@@ -117,8 +117,8 @@ const handlers = {
         const out = wasm.annotate_binding_pairs(bytes, cutoff, format);
 
         try {
-            const pairsRaw = out.pairs();
-            const distancesRaw = out.distances();
+            const pairsRaw = out.take_pairs();
+            const distancesRaw = out.take_distances();
             const pairs = Array.from(pairsRaw || []).map((x) => String(x));
             const distances = Array.from(distancesRaw || []).map((x) => Number(x));
             return { payload: { ok: true, kind: "binding_pairs", pairs, distances }, transfer: [] };
@@ -141,10 +141,10 @@ const handlers = {
 
         const cm = wasm.d_map(bytes, chain_id, format);
         try {
-            const axisArr = cm.axis();
+            const axisArr = cm.take_axis();
             const axis = Array.from(axisArr || []).map((x) => String(x));
 
-            const rawValues = cm.values();
+            const rawValues = cm.take_values();
             let values;
             if (rawValues instanceof Float64Array) values = rawValues;
             else if (Array.isArray(rawValues)) values = Float64Array.from(rawValues.map((x) => Number(x)));

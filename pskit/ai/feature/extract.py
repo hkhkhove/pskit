@@ -12,6 +12,7 @@ from Bio.PDB.MMCIFParser import MMCIFParser
 
 warnings.filterwarnings("ignore")
 
+
 def get_edges(pdb_file, cutoff=12):
     prot_name, ext = os.path.splitext(os.path.basename(pdb_file))
     if ext == ".cif":
@@ -39,7 +40,7 @@ def get_edges(pdb_file, cutoff=12):
                 continue
             diff_vector = coord_i - coord_j
             d2 = np.sum(diff_vector * diff_vector)
-            if d2 is not None and d2 <= cutoff*cutoff:
+            if d2 is not None and d2 <= cutoff * cutoff:
                 left.append(i)
                 right.append(j)
                 left.append(j)
@@ -68,9 +69,8 @@ def standardization(data, epsilon=1e-8):
 
 
 def combine(pdb_files):
-
     success_combine = []
-    error_combine={}
+    error_combine = {}
 
     for pdb_file in pdb_files:
         try:
@@ -80,10 +80,10 @@ def combine(pdb_files):
             saprot_file = pdb_file.replace(ext, "_saprot.npy")
 
             if not os.path.exists(esm2_file):
-                error_combine[prot_name] = f"Extract ESM2 feature failed"
+                error_combine[prot_name + ext] = "Extract ESM2 feature failed"
                 continue
             if not os.path.exists(saprot_file):
-                error_combine[prot_name] = f"Extract SaProt feature failed"
+                error_combine[prot_name + ext] = "Extract SaProt feature failed"
                 continue
 
             esm2_rep = np.load(esm2_file)
@@ -97,17 +97,17 @@ def combine(pdb_files):
             assert esm2_rep.shape[0] == saprot_rep.shape[0] == len(coords), f"feature dimension mismatch, esm2_rep:{esm2_rep.shape[0]},saprot_rep:{saprot_rep.shape[0]},coords:{len(coords)}"
 
             node_feats = np.concatenate([esm2_rep, saprot_rep], axis=1)
-            
-            input_data_file=pdb_file.replace(ext, "_input.pkl")
+
+            input_data_file = pdb_file.replace(ext, "_input.pkl")
 
             with open(input_data_file, "wb") as f:
                 pickle.dump((prot_name, node_feats, coords, edges, edge_attr), f)
 
             success_combine.append(pdb_file)
         except Exception as e:
-            error_combine[prot_name] = f"Prepare feature failed due to {str(e)}"
+            error_combine[prot_name + ext] = f"Prepare feature failed due to {str(e)}"
 
-    return success_combine,error_combine
+    return success_combine, error_combine
 
 
 def run(pdb_files, path):
@@ -130,4 +130,3 @@ def run(pdb_files, path):
     success_combine, error_combine = combine(pdb_files)
 
     return success_combine, error_combine
-

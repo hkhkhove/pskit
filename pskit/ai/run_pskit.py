@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import json
 import os
+import sys
 import traceback
 
 from .config import path
@@ -51,20 +53,32 @@ class LMEmbed(BaseParams):
     model_type: str = "esm2"  # esm2, saprot, or both
 
     def run(self):
+        esm2_error = {}
+        saprot_error = {}
+        all_error = {}
         if self.model_type in ["esm2", "both"]:
-            return esm2.run(
+            esm2_error = esm2.run(
                 input_dir=self.input_dir,
                 output_dir=self.output_dir,
                 path=path,
             )
         if self.model_type in ["saprot", "both"]:
-            return saprot.run(
+            saprot_error = saprot.run(
                 input_dir=self.input_dir,
                 output_dir=self.output_dir,
                 path=path,
             )
         else:
             return {"model_type": f"Unknown model type: {self.model_type}"}
+
+        all_error.update(esm2_error)
+        for k, v in saprot_error.items():
+            if k in all_error:
+                all_error[k] += "; " + v
+            else:
+                all_error[k] = v
+
+        return all_error
 
 
 class_map = {
@@ -100,6 +114,20 @@ def main(params):
         print(f"[PSKit] Errors: {error}")
         error_file = os.path.join(output_dir, "error.json")
         with open(error_file, "w") as f:
-            import json
-
             json.dump(error, f, indent=4)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python -m ai.run_pskit <params.json>")
+        sys.exit(1)
+
+    params_file = sys.argv[1]
+    if not os.path.exists(params_file):
+        print(f"Error: params file not found: {params_file}")
+        sys.exit(1)
+
+    with open(params_file, "r") as f:
+        params = json.load(f)
+
+    main(params)

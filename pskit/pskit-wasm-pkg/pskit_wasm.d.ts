@@ -1,16 +1,22 @@
 /* tslint:disable */
 /* eslint-disable */
-export function d_map(input: Uint8Array, chain_id: string | null | undefined, format: string): ContactMap;
+export function annotate_binding_pairs(input: Uint8Array, cutoff: number, format: string): BindingPairs;
 export function split_complex(input: Uint8Array, format: string): Chunks;
 export function split_by_chain(input: Uint8Array, format: string): Chunks;
-export function annotate_binding_pairs(input: Uint8Array, cutoff: number, format: string): BindingPairs;
 export function extract_fragment(input: Uint8Array, chain_id: string, start: number | null | undefined, end: number | null | undefined, format: string): Fragment;
+export function d_map(input: Uint8Array, chain_id: string | null | undefined, format: string): ContactMap;
 export class BindingPairs {
   private constructor();
   free(): void;
   [Symbol.dispose](): void;
-  pairs(): Array<any>;
-  distances(): Float64Array;
+  /**
+   * Take the pairs array (consuming).
+   */
+  take_pairs(): Array<any> | undefined;
+  /**
+   * Take the distances as Float64Array (consuming).
+   */
+  take_distances(): Float64Array | undefined;
 }
 export class Chunks {
   free(): void;
@@ -30,14 +36,24 @@ export class ContactMap {
   private constructor();
   free(): void;
   [Symbol.dispose](): void;
-  axis(): Array<any>;
-  values(): Float64Array;
+  /**
+   * Take the values as a flat Float64Array (consuming, row-major order).
+   */
+  take_values(): Float64Array | undefined;
+  /**
+   * Take the axis labels (consuming).
+   */
+  take_axis(): Array<any> | undefined;
 }
 export class Fragment {
   private constructor();
   free(): void;
   [Symbol.dispose](): void;
-  end(): number;
-  bytes(): Uint8Array;
-  start(): number;
+  /**
+   * Take the bytes out as a JS Uint8Array (consuming, avoids double memory).
+   * Returns None if already taken.
+   */
+  take_bytes(): Uint8Array | undefined;
+  readonly end: number;
+  readonly start: number;
 }

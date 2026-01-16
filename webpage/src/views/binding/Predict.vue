@@ -39,6 +39,10 @@ const parsedResultsAll = ref([]); // Array of { baseName, csvFile, structureFile
 const viewerContainer = ref(null);
 let viewerInstance = null;
 let viewerObjectUrl = null;
+const isStructureLoading = ref(false);
+
+// Structure file cache: Map<download_url, Blob>
+const structureBlobCache = new Map();
 
 const MOLSTAR_COLORS = {
     nonSelected: { r: 190, g: 190, b: 190 },
@@ -162,6 +166,7 @@ async function renderStructureWithPredictions() {
     if (!viewerContainer.value) return;
     if (parsedPredictions.value.length === 0) return;
 
+    isStructureLoading.value = true;
     try {
         await ensurePdbeMolstarLoaded();
         await nextTick();
@@ -174,10 +179,16 @@ async function renderStructureWithPredictions() {
 
         // Try to load structure
         if (structureFile.value) {
-            // Use result structure file
+            // Use result structure file (with caching)
             revokeViewerObjectUrl();
-            const response = await fetch(structureFile.value.download_url);
-            const blob = await response.blob();
+            const cacheKey = structureFile.value.download_url;
+            let blob = structureBlobCache.get(cacheKey);
+            if (!blob) {
+                // Fetch and cache
+                const response = await fetch(cacheKey);
+                blob = await response.blob();
+                structureBlobCache.set(cacheKey, blob);
+            }
             viewerObjectUrl = URL.createObjectURL(blob);
             options.customData = {
                 url: viewerObjectUrl,
@@ -230,6 +241,8 @@ async function renderStructureWithPredictions() {
         }
     } catch (e) {
         console.error("Error rendering structure:", e);
+    } finally {
+        isStructureLoading.value = false;
     }
 }
 
@@ -290,6 +303,7 @@ async function handleSubmit() {
     structureFile.value = null;
     parsedResultsAll.value = [];
     current_index.value = 0;
+    structureBlobCache.clear();
 
     task_id.value = nanoid();
 
@@ -402,12 +416,10 @@ async function parseSingleCsv(file) {
         return [];
     }
 }
-
 function handleTaskFailed(error) {
     // Stay on TaskResult view to show error
     showResults.value = false;
 }
-
 // 从 URL 恢复 task_id，支持用户保存链接稍后查看
 watch(
     () => route.query,
@@ -445,8 +457,18 @@ onBeforeUnmount(() => {
                 <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
                 <!-- Mol* Viewer -->
-                <div v-if="parsedPredictions.length > 0" class="w-full h-screen relative rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div v-if="parsedPredictions.length > 0" class="w-full h-[720px] relative rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
                     <div ref="viewerContainer" class="w-full h-full relative z-50"></div>
+                    <!-- Loading overlay -->
+                    <div v-if="isStructureLoading" class="absolute inset-0 z-[60] flex items-center justify-center bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
+                        <div class="flex flex-col items-center gap-3">
+                            <svg class="animate-spin h-10 w-10 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Loading structure...</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Color Legend -->
@@ -479,7 +501,7 @@ onBeforeUnmount(() => {
                 <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
                 <!-- Prediction Table -->
-                <div v-if="parsedPredictions.length > 0" class="flex flex-col h-screen rounded-lg border border-gray-200 dark:border-gray-700">
+                <div v-if="parsedPredictions.length > 0" class="flex flex-col h-[720px] rounded-lg border border-gray-200 dark:border-gray-700">
                     <div class="flex justify-between items-center mb-2 px-3 pt-3">
                         <div class="space-y-1">
                             <div class="text-sm font-semibold text-gray-900 dark:text-gray-200">{{ current_title }}</div>
@@ -525,11 +547,23 @@ onBeforeUnmount(() => {
             </div>
         </div>
 
+        <!-- Error Items from error.json -->
+        <div v-if="Object.keys(errorItems).length > 0 && is_results_view && showResults" class="m-4">
+            <h4 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-3">Processing Errors</h4>
+            <div class="space-y-2">
+                <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+                    <p class="text-sm text-red-800 dark:text-red-300">
+                        <span class="font-semibold">{{ filename }}:</span> {{ message }}
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <!-- Task Status View (pending/processing/failed - uses TaskResult component) -->
         <TaskResult v-else-if="is_results_view && !showResults" :task-id="task_id" task-name="Binding Site Prediction" @completed="handleTaskCompleted" @failed="handleTaskFailed" />
 
         <!-- Form View -->
-        <form v-else @submit.prevent="handleSubmit" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
+        <form v-if="!is_results_view" @submit.prevent="handleSubmit" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
             <div class="flex w-full justify-start">
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Predict Binding Sites</p>
             </div>
@@ -565,7 +599,7 @@ onBeforeUnmount(() => {
                     </li>
                 </ul>
                 <ul class="mt-4 text-sm dark:text-gray-500 space-y-1.5 list-disc list-inside">
-                    <li class="my-1 text-xs font-normal text-gray-500 dark:text-gray-300">Input files must contain a single protein chain. If multiple chains are present, only the first one will be processed.</li>
+                    <li class="my-1 text-xs font-normal text-gray-500 dark:text-gray-300">Input files must contain a single protein chain. <span class="border-b-1 font-bold">If multiple chains are present, only the first one will be processed.</span></li>
                     <li class="my-1 text-xs font-normal text-gray-500 dark:text-gray-300">Output CSV file contains binding scores for each residue.</li>
                     <li class="my-1 text-xs font-normal text-gray-500 dark:text-gray-300">Prediction requires extracting features first, which may take some time.</li>
                 </ul>
@@ -585,16 +619,5 @@ onBeforeUnmount(() => {
                 {{ submissionError }}
             </div>
         </form>
-    </div>
-    <!-- Error Items from error.json -->
-    <div v-if="Object.keys(errorItems).length > 0" class="m-4">
-        <h4 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-3">Processing Errors</h4>
-        <div class="space-y-2">
-            <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
-                <p class="text-sm text-red-800 dark:text-red-300">
-                    <span class="font-semibold">{{ filename }}:</span> {{ message }}
-                </p>
-            </div>
-        </div>
     </div>
 </template>

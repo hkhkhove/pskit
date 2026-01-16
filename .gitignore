@@ -5,7 +5,6 @@ tasks/
 webserver/target/
 pskit/toolkit/target/
 test/
-.code-workspace
 .DS_Store
 *.tar
 *.tar.gz

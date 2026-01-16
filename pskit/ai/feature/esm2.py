@@ -1,6 +1,5 @@
 import os
 import warnings
-import gc
 
 import numpy as np
 import torch
@@ -36,7 +35,6 @@ def get_seq(pdb_file):
         "HIS": "H",
         "ARG": "R",
     }
-    prot_name, ext = os.path.splitext(os.path.basename(pdb_file))
     structure = read_structure(pdb_file)
     model = structure[0]
     seq = ""
@@ -47,10 +45,10 @@ def get_seq(pdb_file):
                     seq += AA_dic[residue.resname]
             break  # Only consider the first protein chain
 
-    save_path = f"{os.path.join(os.path.dirname(pdb_file), prot_name + '.fasta')}"
+    if not seq:
+        raise Exception("Not having protein chain")
 
-    with open(save_path, "w") as f:
-        f.write(f">{prot_name}\n{seq}\n")
+    return seq
 
 
 def inference(model, input, save_path):
@@ -87,13 +85,9 @@ def run(input_dir, output_dir, path):
             if os.path.isfile(save_path):
                 continue
 
-            fasta_file = os.path.join(input_dir, prot_name + ".fasta")
-            if not os.path.isfile(fasta_file):
-                get_seq(pdb_file)
-
-            with open(fasta_file) as f:
-                f.readline()
-                seq = f.readline().strip()
+            seq = get_seq(pdb_file)
+            if len(seq) > 1000:
+                raise Exception("Sequence length exceeds 1000 residues")
 
             data = [(prot_name, seq)]
             batch_labels, batch_strs, batch_tokens = batch_converter(data)
@@ -102,12 +96,6 @@ def run(input_dir, output_dir, path):
 
             inference(model, batch_tokens_device, save_path)
         except Exception as e:
-            error[os.path.basename(pdb_file)] = str(e)
-
-    # 释放模型内存
-    del model
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+            error[os.path.basename(pdb_file)] = f"ESM2 failed: {str(e)}"
 
     return error

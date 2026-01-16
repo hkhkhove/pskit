@@ -524,7 +524,7 @@ onBeforeUnmount(async () => {
                 </div>
                 <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-                <div class="w-full h-screen relative rounded-lg border border-gray-200 dark:border-gray-700">
+                <div class="w-full h-[720px] relative rounded-lg border border-gray-200 dark:border-gray-700">
                     <div ref="viewerContainer" class="w-full h-full relative"></div>
                 </div>
                 <!-- Color Legend -->
@@ -556,7 +556,7 @@ onBeforeUnmount(async () => {
 
                 <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-                <div v-if="current_result" class="flex flex-col h-screen rounded-lg border border-gray-200 dark:border-gray-700">
+                <div v-if="current_result" class="flex flex-col h-[720px] rounded-lg border border-gray-200 dark:border-gray-700">
                     <div class="flex justify-between items-center mb-2 px-3 pt-3">
                         <div class="space-y-2">
                             <div class="text-sm font-semibold text-gray-900 dark:text-gray-200">{{ current_title }}</div>

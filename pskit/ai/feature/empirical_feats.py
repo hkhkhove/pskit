@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 import shutil
 import traceback
-from ..config import path
+from ..config import path as mypath
 
 
 def run_dssp(input_dir, output_dir):
@@ -11,15 +11,15 @@ def run_dssp(input_dir, output_dir):
     pdb_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith(".pdb") or f.endswith(".cif")]
     for pdb_file in pdb_files:
         try:
-            prot_name = os.path.splitext(os.path.basename(pdb_file))[0]
+            prot_name, ext = os.path.splitext(os.path.basename(pdb_file))
             dssp_file = os.path.join(output_dir, prot_name + ".dssp")
             if not os.path.isfile(dssp_file):
-                cmd = [path["dssp"], "--output-format", "dssp", pdb_file, dssp_file]
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                cmd = [mypath["dssp"], "--output-format", "dssp", pdb_file, dssp_file]
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
                 if result.returncode != 0:
                     raise Exception(f"DSSP failed: {result.stderr}")
         except Exception as e:
-            error[prot_name] = str(e)
+            error[prot_name + ext] = str(e)
     return error
 
 
@@ -76,7 +76,7 @@ def run_rosetta_score(input_dir, output_dir, do_relax):
     exts = {".pdb", ".cif"}
     inputs = sorted([p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() in exts])
     if not inputs:
-        raise ValueError(f"Can't find any PDB/CIF files")
+        raise ValueError("Can't find any PDB/CIF files")
 
     for in_path in inputs:
         try:
@@ -107,14 +107,14 @@ def run_rosetta_score(input_dir, output_dir, do_relax):
                     "-overwrite",
                 ]
 
-                result = subprocess.run(relax_cmd, capture_output=True, text=True)
+                result = subprocess.run(relax_cmd, capture_output=True, text=True, check=False)
                 if result.returncode != 0:
                     raise Exception(f"Rosetta relax failed: {result.stderr}")
 
                 relaxed_pdb = os.path.join(output_dir, f"{stem}_relaxed_0001.pdb")
 
                 if not os.path.exists(relaxed_pdb):
-                    raise Exception(f"Rosetta relax failed")
+                    raise Exception("Rosetta relax failed")
 
                 structure_to_score = relaxed_pdb
             # 3.rosetta score
@@ -129,17 +129,16 @@ def run_rosetta_score(input_dir, output_dir, do_relax):
                 str(scorefile),
                 "-overwrite",
             ]
-            result = subprocess.run(score_cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(score_cmd, capture_output=True, text=True, check=False)
             if result.returncode != 0:
                 raise Exception(f"Rosetta score failed: {result.stderr}")
         except Exception as e:
-            error[in_path.name] = str(e)
+            error[in_path.name] = f"Rosetta failed: {str(e)}"
 
     return error
 
 
 def run(input_dir, output_dir, emp_feats, rosetta_relax):
-    pdb_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith(".pdb") or f.endswith(".cif") or f.endswith(".mmcif")]
     os.makedirs(output_dir, exist_ok=True)
 
     error = {}

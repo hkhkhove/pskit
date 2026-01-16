@@ -165,110 +165,108 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="flex flex-col items-center py-8 px-4">
-        <div class="w-full max-w-3xl rounded-lg shadow-xl p-8 bg-white dark:bg-gray-900">
-            <h1 class="text-3xl font-bold text-center text-gray-800 dark:text-gray-400 mb-6">
-                {{ taskName }}
-            </h1>
+    <div class="w-full max-w-3xl rounded-lg shadow-xl p-8 bg-white dark:bg-gray-900">
+        <h1 class="text-3xl font-bold text-center text-gray-800 dark:text-gray-400 mb-6">
+            {{ taskName }}
+        </h1>
 
-            <!-- Loading initial state -->
-            <div v-if="isLoading" class="text-center text-gray-500 dark:text-gray-400">
-                <p>Loading task details...</p>
+        <!-- Loading initial state -->
+        <div v-if="isLoading" class="text-center text-gray-500 dark:text-gray-400">
+            <p>Loading task details...</p>
+        </div>
+
+        <!-- Fetch error -->
+        <div v-else-if="fetchError" class="p-4 rounded-lg bg-red-100 border border-red-400 text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">
+            <p>Error: {{ fetchError }}</p>
+        </div>
+
+        <!-- Task status loaded -->
+        <div v-else>
+            <!-- Status and time info grid -->
+            <div class="grid grid-cols-2 gap-4 mb-6 border-b border-gray-300 pb-4">
+                <div>
+                    <strong class="text-gray-600 dark:text-gray-400">Status: </strong>
+                    <span
+                        class="font-semibold"
+                        :class="{
+                            'text-violet-600': isPending,
+                            'text-blue-600': isProcessing,
+                            'text-green-600': isCompleted,
+                            'text-red-600': isFailed,
+                        }">
+                        {{ isPending ? "Pending" : isProcessing ? "Processing" : isCompleted ? "Completed" : "Failed" }}
+                    </span>
+                </div>
+                <div class="dark:text-gray-500">
+                    <strong class="text-gray-600 dark:text-gray-400">Submitted: </strong>
+                    {{ formatDateTime(uploadTime) }}
+                </div>
+                <div class="dark:text-gray-500">
+                    <strong class="text-gray-600 dark:text-gray-400">Started: </strong>
+                    {{ formatDateTime(startTime) }}
+                </div>
+                <div class="dark:text-gray-500">
+                    <strong class="text-gray-600 dark:text-gray-400">Finished: </strong>
+                    {{ formatDateTime(endTime) }}
+                </div>
             </div>
 
-            <!-- Fetch error -->
-            <div v-else-if="fetchError" class="p-4 rounded-lg bg-red-100 border border-red-400 text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">
-                <p>Error: {{ fetchError }}</p>
+            <!-- Pending or Processing -->
+            <div v-if="isPending || isProcessing" class="text-center py-8">
+                <!-- Spinner animation -->
+                <svg class="animate-spin h-8 w-8 text-blue-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p v-if="isPending" class="text-lg text-gray-600 dark:text-gray-400">
+                    Your task is queued<span v-if="position">
+                        at position <span class="font-bold">{{ position }}</span></span
+                    >. Please wait...
+                </p>
+                <p v-else class="text-lg text-gray-600 dark:text-gray-400">Your task is being processed. Please wait...</p>
+                <p class="text-sm text-gray-400 dark:text-gray-500">The page will update automatically.</p>
+                <p class="text-sm text-gray-400 mb-4 dark:text-gray-500">You can bookmark this page to view your results later.</p>
             </div>
 
-            <!-- Task status loaded -->
-            <div v-else>
-                <!-- Status and time info grid -->
-                <div class="grid grid-cols-2 gap-4 mb-6 border-b border-gray-300 pb-4">
-                    <div>
-                        <strong class="text-gray-600 dark:text-gray-400">Status: </strong>
-                        <span
-                            class="font-semibold"
-                            :class="{
-                                'text-violet-600': isPending,
-                                'text-blue-600': isProcessing,
-                                'text-green-600': isCompleted,
-                                'text-red-600': isFailed,
-                            }">
-                            {{ isPending ? "Pending" : isProcessing ? "Processing" : isCompleted ? "Completed" : "Failed" }}
-                        </span>
-                    </div>
-                    <div class="dark:text-gray-500">
-                        <strong class="text-gray-600 dark:text-gray-400">Submitted: </strong>
-                        {{ formatDateTime(uploadTime) }}
-                    </div>
-                    <div class="dark:text-gray-500">
-                        <strong class="text-gray-600 dark:text-gray-400">Started: </strong>
-                        {{ formatDateTime(startTime) }}
-                    </div>
-                    <div class="dark:text-gray-500">
-                        <strong class="text-gray-600 dark:text-gray-400">Finished: </strong>
-                        {{ formatDateTime(endTime) }}
-                    </div>
-                </div>
+            <!-- Task Failed -->
+            <div v-else-if="isFailed" class="p-4 rounded-lg bg-red-100 border border-red-400 text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">
+                <p>
+                    <strong>Task Failed: </strong>
+                    {{ errorMessage || "An unknown error occurred." }}
+                </p>
+            </div>
 
-                <!-- Pending or Processing -->
-                <div v-if="isPending || isProcessing" class="text-center py-8">
-                    <!-- Spinner animation -->
-                    <svg class="animate-spin h-8 w-8 text-blue-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <p v-if="isPending" class="text-lg text-gray-600 dark:text-gray-400">
-                        Your task is queued<span v-if="position">
-                            at position <span class="font-bold">{{ position }}</span></span
-                        >. Please wait...
-                    </p>
-                    <p v-else class="text-lg text-gray-600 dark:text-gray-400">Your task is being processed. Please wait...</p>
-                    <p class="text-sm text-gray-400 dark:text-gray-500">The page will update automatically.</p>
-                    <p class="text-sm text-gray-400 mb-4 dark:text-gray-500">You can bookmark this page to view your results later.</p>
-                </div>
-
-                <!-- Task Failed -->
-                <div v-else-if="isFailed" class="p-4 rounded-lg bg-red-100 border border-red-400 text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">
-                    <p>
-                        <strong>Task Failed: </strong>
-                        {{ errorMessage || "An unknown error occurred." }}
-                    </p>
-                </div>
-
-                <!-- Task Completed -->
-                <!-- <div v-else-if="isCompleted"> -->
+            <!-- Task Completed -->
+            <div v-else-if="isCompleted">
                 <!-- Error items from error.json -->
-                <!-- <div v-if="hasErrorItems" class="mb-6">
-                        <h2 class="text-xl font-semibold text-red-600 dark:text-red-400 mb-4">Processing Errors</h2>
-                        <div class="space-y-2">
-                            <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
-                                <p class="text-sm font-medium text-red-800 dark:text-red-300">
-                                    <span class="font-bold">{{ filename }}:</span> {{ message }}
-                                </p>
-                            </div>
+                <div v-if="hasErrorItems" class="mb-6">
+                    <h2 class="text-xl font-semibold text-red-600 dark:text-red-400 mb-4">Processing Errors</h2>
+                    <div class="space-y-2">
+                        <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+                            <p class="text-sm font-medium text-red-800 dark:text-red-300">
+                                <span class="font-bold">{{ filename }}:</span> {{ message }}
+                            </p>
                         </div>
                     </div>
+                </div>
 
-                    <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-400 mb-4">Result Files</h2> -->
+                <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-400 mb-4">Result Files</h2>
 
                 <!-- File list -->
-                <!-- <div v-if="displayFiles.length > 0" class="space-y-3">
-                        <div v-for="file in displayFiles" :key="file.filename" class="flex items-center justify-between p-3 bg-gray-50 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-                            <div class="min-w-0 flex-1">
-                                <p class="text-sm font-medium text-gray-900 dark:text-gray-200 truncate">{{ file.filename }}</p>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ formatFileSize(file.size) }}</p>
-                            </div>
-                            <a :href="file.download_url" download class="ml-4 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition text-sm"> Download </a>
+                <div v-if="displayFiles.length > 0" class="space-y-3">
+                    <div v-for="file in displayFiles" :key="file.filename" class="flex items-center justify-between p-3 bg-gray-50 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-700">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-sm font-medium text-gray-900 dark:text-gray-200 truncate">{{ file.filename }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ formatFileSize(file.size) }}</p>
                         </div>
-                    </div> -->
+                        <a :href="file.download_url" download class="ml-4 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition text-sm"> Download </a>
+                    </div>
+                </div>
 
                 <!-- No files -->
-                <!-- <div v-else class="text-center py-4 text-gray-500 dark:text-gray-400">
-                        <p>Processing completed, but no result files were generated.</p>
-                    </div>
-                </div> -->
+                <div v-else class="text-center py-4 text-gray-500 dark:text-gray-400">
+                    <p>Processing completed, but no result files were generated.</p>
+                </div>
             </div>
         </div>
     </div>
