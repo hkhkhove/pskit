@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import InputStructure from "../../components/InputStructure.vue";
 import { parsePdbIds, isValidPdbId, revokeDownloadItems, groupDownloadItemsBySource, prepareInputsFromFiles, prepareInputsFromPdbIds, runBatch, extractFragmentInWorker, bytesToDownloadItem, sanitizeKey, downloadGroupedAsZip, stripExtension, getFormatFromFileName } from "../../utils/wasmBatch.js";
 import { ensurePdbeMolstarLoaded, createPdbeMolstarViewer, renderPdbeMolstar, applySelectionWithRetry, waitForStructureReady, molstarFormatFromPskitFormat, createBlobUrlFromBytes } from "../../utils/pdbeMolstar.js";
+import Loading from "../../components/Loading.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -301,7 +302,7 @@ async function renderMolstarForSelected() {
                 const cached = idStructureCache.get(
                     String(id || "")
                         .trim()
-                        .toLowerCase()
+                        .toLowerCase(),
                 );
                 if (cached?.bytes) {
                     const url = createBlobUrlFromBytes(cached.bytes);
@@ -341,7 +342,7 @@ watch(
         }
         await renderMolstarForSelected();
     },
-    { flush: "post" }
+    { flush: "post" },
 );
 
 watch(
@@ -351,7 +352,7 @@ watch(
         if (!has_results.value) return;
         await renderMolstarForSelected();
     },
-    { flush: "post" }
+    { flush: "post" },
 );
 
 // When navigating back/forward into results view, ensure the viewer is rendered.
@@ -366,7 +367,7 @@ watch(
         }
         await renderMolstarForSelected();
     },
-    { flush: "post" }
+    { flush: "post" },
 );
 
 // If the user refreshes or directly visits ExtractFragment?view=results, we may have no
@@ -381,7 +382,7 @@ watch(
         delete q.view;
         router.replace({ query: q });
     },
-    { immediate: true }
+    { immediate: true },
 );
 
 async function downloadAllAsZip() {
@@ -482,8 +483,9 @@ async function downloadAllAsZip() {
 
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-            <button type="submit" class="w-full rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700">
-                {{ run_button_text }}
+            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed" :disabled="processing" :aria-busy="processing">
+                <Loading v-if="processing" class="h-5 w-5 text-white" />
+                <span>{{ run_button_text }}</span>
             </button>
 
             <div v-if="error_message" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import JSZip from "jszip";
 import InputStructure from "../components/InputStructure.vue";
 import { parsePdbIds, isValidPdbId, prepareInputsFromFiles, prepareInputsFromPdbIds, runBatch, dMapInWorker, sanitizeKey } from "../utils/wasmBatch.js";
+import Loading from "../components/Loading.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -24,6 +25,11 @@ const file_errors = ref([]);
 const progress = ref({ current: 0, total: 0, current_file: "" });
 
 const current_index = ref(0);
+
+// Color threshold control (legend/normalization)
+// The slider controls a fraction of the per-result data max (vmax).
+const color_min_percent = ref(0);
+const color_max_percent = ref(100);
 
 const canvas_el = ref(null);
 const canvas_wrap_el = ref(null);
@@ -321,7 +327,7 @@ function downloadHeatmapPng() {
                 URL.revokeObjectURL(url);
             },
             "image/png",
-            1.0
+            1.0,
         );
     } catch (e) {
         error_message.value = e?.message ? String(e.message) : String(e);
@@ -374,32 +380,32 @@ function clamp01(x) {
     return x;
 }
 
-// Sequential colormap: Viridis (matplotlib) - reversed
+// Diverging colormap: Red -> White -> Blue
 // Keep the same number of stops for smooth gradients.
-const VIRIDIS_STOPS = [
-    { t: 0.0, c: [253, 231, 37] },
-    { t: 0.125, c: [109, 205, 89] },
-    { t: 0.25, c: [53, 183, 121] },
-    { t: 0.375, c: [31, 158, 137] },
-    { t: 0.5, c: [38, 130, 142] },
-    { t: 0.625, c: [49, 104, 142] },
-    { t: 0.75, c: [62, 73, 137] },
-    { t: 0.875, c: [72, 40, 120] },
-    { t: 1.0, c: [68, 1, 84] },
+const RWB_STOPS = [
+    { t: 0.0, c: [178, 24, 43] },
+    { t: 0.125, c: [214, 96, 77] },
+    { t: 0.25, c: [244, 165, 130] },
+    { t: 0.375, c: [253, 219, 199] },
+    { t: 0.5, c: [247, 247, 247] },
+    { t: 0.625, c: [209, 229, 240] },
+    { t: 0.75, c: [146, 197, 222] },
+    { t: 0.875, c: [67, 147, 195] },
+    { t: 1.0, c: [33, 102, 172] },
 ];
 
-function viridisColor(t) {
-    // Viridis colormap via linear interpolation between stops.
+function rwbColor(t) {
+    // Linear interpolation between color stops.
     const x = clamp01(t);
-    for (let i = 0; i < VIRIDIS_STOPS.length - 1; i++) {
-        const a = VIRIDIS_STOPS[i];
-        const b = VIRIDIS_STOPS[i + 1];
+    for (let i = 0; i < RWB_STOPS.length - 1; i++) {
+        const a = RWB_STOPS[i];
+        const b = RWB_STOPS[i + 1];
         if (x >= a.t && x <= b.t) {
             const u = (x - a.t) / (b.t - a.t);
             return [Math.round(lerp(a.c[0], b.c[0], u)), Math.round(lerp(a.c[1], b.c[1], u)), Math.round(lerp(a.c[2], b.c[2], u))];
         }
     }
-    return VIRIDIS_STOPS[VIRIDIS_STOPS.length - 1].c;
+    return RWB_STOPS[RWB_STOPS.length - 1].c;
 }
 
 function parseAxisEntry(s) {
@@ -447,6 +453,8 @@ function drawHeatmapWithAxesAndLegend(ctx, off, meta, cssW, cssH, opts = {}) {
     const entries = Array.isArray(meta?.axisEntries) ? meta.axisEntries : Array.isArray(meta?.axis) ? meta.axis.map(parseAxisEntry) : [];
     const segments = chainSegmentsFromAxisEntries(entries);
     const vmax = Number.isFinite(meta?.vmax) ? Number(meta.vmax) : 0;
+    const vminColor = Number.isFinite(meta?.vminColor) ? Number(meta.vminColor) : 0;
+    const vmaxColor = Number.isFinite(meta?.vmaxColor) ? Number(meta.vmaxColor) : vmax;
 
     // Layout (CSS pixels). Keep the whole chart centered inside the canvas.
     const marginLeft = 64;
@@ -535,7 +543,7 @@ function drawHeatmapWithAxesAndLegend(ctx, off, meta, cssW, cssH, opts = {}) {
         const legendX = heatX;
         const legendY = heatY + plot + 20;
         const grad = ctx.createLinearGradient(legendX, 0, legendX + plot, 0);
-        for (const st of VIRIDIS_STOPS) {
+        for (const st of RWB_STOPS) {
             grad.addColorStop(st.t, `rgb(${st.c[0]},${st.c[1]},${st.c[2]})`);
         }
         ctx.textAlign = "left";
@@ -548,9 +556,9 @@ function drawHeatmapWithAxesAndLegend(ctx, off, meta, cssW, cssH, opts = {}) {
         ctx.strokeRect(legendX, legendY, plot, legendH);
         ctx.globalAlpha = 0.9;
         ctx.fillStyle = textColor;
-        ctx.fillText("0", legendX, legendY + legendH + 6);
+        ctx.fillText(formatLegendNumber(vminColor), legendX, legendY + legendH + 6);
         ctx.textAlign = "right";
-        ctx.fillText(formatLegendNumber(vmax), legendX + plot, legendY + legendH + 6);
+        ctx.fillText(formatLegendNumber(vmaxColor), legendX + plot, legendY + legendH + 6);
     }
     ctx.restore();
 }
@@ -589,12 +597,21 @@ async function renderHeatmapCanvas(res) {
 
     const img = offCtx.createImageData(n, n);
     const data = img.data;
-    const denom = vmax > 0 ? vmax : 1;
+    const denomRaw = vmax > 0 ? vmax : 1;
+
+    // Clamp UI inputs and enforce min < max (both are % of denomRaw).
+    let minPct = Math.max(0, Math.min(99, Math.round(Number(color_min_percent.value) || 0)));
+    let maxPct = Math.max(1, Math.min(100, Math.round(Number(color_max_percent.value) || 100)));
+    if (minPct >= maxPct) minPct = Math.max(0, maxPct - 1);
+
+    const vminColor = denomRaw * (minPct / 100);
+    const vmaxColor = denomRaw * (maxPct / 100);
+    const range = Math.max(1e-12, vmaxColor - vminColor);
 
     // Initialize pixels so partially rendered frames still show.
     // In the packed-upper path we don't explicitly write the diagonal, so set
     // the default RGB to the color at t=0 (i.e., value 0) instead of black.
-    const base = viridisColor(0);
+    const base = rwbColor(0);
     for (let p = 0; p < data.length; p += 4) {
         data[p + 0] = base[0];
         data[p + 1] = base[1];
@@ -606,7 +623,7 @@ async function renderHeatmapCanvas(res) {
 
     // Show progressive rendering: make the offscreen canvas available early.
     last_offscreen = off;
-    last_meta = { axis, axisEntries, n, vmax };
+    last_meta = { axis, axisEntries, n, vmax, vminColor, vmaxColor };
     paintToVisible(last_offscreen, last_meta);
 
     // Fill symmetric pixels from packed upper triangle, chunked to keep UI responsive.
@@ -622,8 +639,8 @@ async function renderHeatmapCanvas(res) {
                 // full matrix path
                 for (let j = 0; j < n; j++) {
                     const v = i === j ? 0 : Number(upper[i * n + j] ?? 0);
-                    const t = Math.max(0, Math.min(1, v / denom));
-                    const [r, g, b] = viridisColor(t);
+                    const t = clamp01((v - vminColor) / range);
+                    const [r, g, b] = rwbColor(t);
                     const p = (i * n + j) * 4;
                     data[p + 0] = r;
                     data[p + 1] = g;
@@ -637,8 +654,8 @@ async function renderHeatmapCanvas(res) {
             let k = (i * (2 * n - i - 1)) / 2;
             for (let j = i + 1; j < n; j++) {
                 const v = Number(upper[k++] ?? 0);
-                const t = Math.max(0, Math.min(1, v / denom));
-                const [r, g, b] = viridisColor(t);
+                const t = clamp01((v - vminColor) / range);
+                const [r, g, b] = rwbColor(t);
 
                 const p1 = (i * n + j) * 4;
                 data[p1 + 0] = r;
@@ -688,7 +705,35 @@ watch(
         await nextTick();
         await renderHeatmapCanvas(res);
     },
-    { flush: "post" }
+    { flush: "post" },
+);
+
+watch(
+    [color_min_percent, color_max_percent],
+    async () => {
+        // Keep values in range and enforce min < max.
+        const nextMin = Math.max(0, Math.min(99, Math.round(Number(color_min_percent.value) || 0)));
+        const nextMax = Math.max(1, Math.min(100, Math.round(Number(color_max_percent.value) || 100)));
+        let minVal = nextMin;
+        let maxVal = nextMax;
+        if (minVal >= maxVal) minVal = Math.max(0, maxVal - 1);
+
+        let changed = false;
+        if (minVal !== color_min_percent.value) {
+            color_min_percent.value = minVal;
+            changed = true;
+        }
+        if (maxVal !== color_max_percent.value) {
+            color_max_percent.value = maxVal;
+            changed = true;
+        }
+        if (changed) return;
+
+        if (!is_results_view.value) return;
+        await nextTick();
+        await renderHeatmapCanvas(current_result.value);
+    },
+    { flush: "post" },
 );
 
 // If the user refreshes or directly visits ContactMap?view=results, we may have no
@@ -703,7 +748,7 @@ watch(
         delete q.view;
         router.replace({ query: q });
     },
-    { immediate: true }
+    { immediate: true },
 );
 </script>
 
@@ -713,7 +758,19 @@ watch(
             <div class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
                 <div class="flex items-center justify-between gap-3">
                     <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Results</p>
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-3 flex-wrap justify-end">
+                        <div class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                            <span class="whitespace-nowrap">Color min</span>
+                            <input type="range" min="0" max="99" step="1" v-model.number="color_min_percent" class="w-32" :disabled="processing" aria-label="Color min percent" />
+                            <input type="number" min="0" max="99" step="1" v-model.number="color_min_percent" class="w-16 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white" :disabled="processing" aria-label="Color min percent value" />
+                            <span class="whitespace-nowrap">%</span>
+                        </div>
+                        <div class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                            <span class="whitespace-nowrap">Color max</span>
+                            <input type="range" min="1" max="100" step="1" v-model.number="color_max_percent" class="w-40" :disabled="processing" aria-label="Color max percent" />
+                            <input type="number" min="1" max="100" step="1" v-model.number="color_max_percent" class="w-16 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white" :disabled="processing" aria-label="Color max percent value" />
+                            <span class="whitespace-nowrap">%</span>
+                        </div>
                         <button v-if="has_multiple_results" class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_next" @click="nextResult">Next</button>
                         <button class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_download_all" @click="downloadAll">Download All (ZIP)</button>
                     </div>
@@ -743,7 +800,7 @@ watch(
 
         <form v-else @submit.prevent="runDMap" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
             <div class="flex w-full justify-start">
-                <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Contact Map</p>
+                <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Contact Map (Distance Map)</p>
             </div>
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
@@ -764,8 +821,9 @@ watch(
 
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-            <button type="submit" class="w-full rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700">
-                {{ run_button_text }}
+            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed" :disabled="processing" :aria-busy="processing">
+                <Loading v-if="processing" class="h-5 w-5 text-white" />
+                <span>{{ run_button_text }}</span>
             </button>
 
             <div v-if="error_message" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">

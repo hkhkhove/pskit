@@ -276,7 +276,7 @@ watch(
             router.replace({ query: q });
         }
     },
-    { immediate: true }
+    { immediate: true },
 );
 </script>
 
@@ -469,9 +469,9 @@ watch(
 
             <!-- Submit Button -->
             <div class="flex items-center gap-3">
-                <button type="submit" :disabled="isLoading" :class="{ 'cursor-not-allowed opacity-50': isLoading }" class="w-full rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700">
-                    <span v-if="isLoading">Submitting...</span>
-                    <span v-else>Submit</span>
+                <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed" :disabled="isLoading" :aria-busy="isLoading">
+                    <Loading v-if="isLoading" class="h-5 w-5 text-white" />
+                    <span>{{ isLoading ? "Submitting..." : "Submit" }}</span>
                 </button>
             </div>
 

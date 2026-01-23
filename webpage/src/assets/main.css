@@ -1,1 +1,42 @@
 @import "tailwindcss";
+
+/* wallpaper */
+:root {
+	--pskit-wallpaper-base: #f6f7fb;
+	--pskit-wallpaper-grid-fine: rgba(15, 82, 186, 0.035);
+	--pskit-wallpaper-grid-bold: rgba(15, 82, 186, 0.045);
+}
+
+.app-wallpaper {
+	background-color: var(--pskit-wallpaper-base);
+	background-image:
+		linear-gradient(var(--pskit-wallpaper-grid-fine) 1px, transparent 1px),
+		linear-gradient(90deg, var(--pskit-wallpaper-grid-fine) 1px, transparent 1px),
+		linear-gradient(var(--pskit-wallpaper-grid-bold) 1px, transparent 1px),
+		linear-gradient(90deg, var(--pskit-wallpaper-grid-bold) 1px, transparent 1px);
+	background-size:
+		24px 24px,
+		24px 24px,
+		120px 120px,
+		120px 120px;
+	background-position:
+		-1px -1px,
+		-1px -1px,
+		-1px -1px,
+		-1px -1px;
+	background-attachment: fixed;
+}
+
+.dark .app-wallpaper {
+	--pskit-wallpaper-base: #0f172a;
+	--pskit-wallpaper-grid-fine: rgba(30, 41, 59, 0.35);
+	--pskit-wallpaper-grid-bold: rgba(30, 41, 59, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+	.app-wallpaper {
+		--pskit-wallpaper-base: #0f172a;
+		--pskit-wallpaper-grid-fine: rgba(30, 41, 59, 0.35);
+		--pskit-wallpaper-grid-bold: rgba(30, 41, 59, 0.5);
+	}
+}
