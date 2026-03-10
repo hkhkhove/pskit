@@ -1,10 +1,31 @@
 <script setup>
 import { ref } from "vue";
 
-const openAnnotate = ref(false);
-const openFeature = ref(false);
-const openSplit = ref(false);
-const openAbout = ref(false);
+const activeMenu = ref(null);
+
+const menus = [
+    {
+        name: "Binding",
+        items: [
+            { name: "Annotate", path: "/binding/annotate" },
+            { name: "Predict", path: "/binding/predict" },
+        ],
+    },
+    {
+        name: "Features",
+        items: [
+            { name: "Structural", path: "/features/structural" },
+            { name: "Language Model", path: "/features/language-model" },
+        ],
+    },
+    {
+        name: "Tools",
+        items: [
+            { name: "Split Complex", path: "/tools/split" },
+            { name: "Extract Fragment", path: "/tools/extract" },
+        ],
+    },
+];
 </script>
 
 <template>
@@ -28,69 +49,38 @@ const openAbout = ref(false);
                 <!-- menu -->
                 <div class="w-auto py-4 text-gray-700 dark:text-gray-400">
                     <ul class="flex flex-row font-medium p-0 mt-0 space-x-10">
-                        <!-- Annotate Dropdown -->
-                        <!-- Binding Dropdown -->
-                        <li class="relative" @mouseenter="openAnnotate = true" @mouseleave="openAnnotate = false">
+                        <li v-for="menu in menus" :key="menu.name" class="relative" @mouseenter="activeMenu = menu.name" @mouseleave="activeMenu = null">
                             <button class="flex items-center space-x-2 hover:text-blue-700 dark:hover:text-blue-400">
-                                Binding
+                                {{ menu.name }}
                                 <svg class="w-2.5 h-2.5 ms-2.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 10 6">
                                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4" />
                                 </svg>
                             </button>
-                            <div v-show="openAnnotate" class="absolute w-40 left-1/2 transform -translate-x-1/2 font-normal z-50">
+                            <div v-show="activeMenu === menu.name" class="absolute w-40 left-1/2 transform -translate-x-1/2 font-normal z-50">
                                 <div class="mt-2 bg-white divide-y divide-gray-100 rounded-lg shadow-sm dark:bg-gray-700 dark:divide-gray-600">
                                     <ul class="block py-2 text-sm text-center">
-                                        <li><router-link to="/binding/annotate" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400">Annotate</router-link></li>
-                                        <li><router-link to="/binding/predict" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400">Predict</router-link></li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </li>
-                        <!-- Features Dropdown -->
-                        <li class="relative" @mouseenter="openFeature = true" @mouseleave="openFeature = false">
-                            <button class="flex items-center space-x-2 hover:text-blue-700 dark:hover:text-blue-400">
-                                Features
-                                <svg class="w-2.5 h-2.5 ms-2.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 10 6">
-                                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4" />
-                                </svg>
-                            </button>
-                            <div v-show="openFeature" class="absolute w-40 left-1/2 transform -translate-x-1/2 font-normal z-50">
-                                <div class="mt-2 bg-white divide-y divide-gray-100 rounded-lg shadow-sm dark:bg-gray-700 dark:divide-gray-600">
-                                    <ul class="block py-2 text-sm text-center text-gray-700 dark:text-gray-400">
-                                        <li><router-link to="/features/structural" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400">Structural</router-link></li>
-                                        <li><router-link to="/features/language-model" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400">Language Model</router-link></li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </li>
-                        <!-- Tools Dropdown -->
-                        <li class="relative" @mouseenter="openSplit = true" @mouseleave="openSplit = false">
-                            <button class="flex items-center space-x-2 hover:text-blue-700 dark:hover:text-blue-400">
-                                Tools
-                                <svg class="w-2.5 h-2.5 ms-2.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 10 6">
-                                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4" />
-                                </svg>
-                            </button>
-                            <div v-show="openSplit" class="absolute w-40 left-1/2 transform -translate-x-1/2 font-normal z-50">
-                                <div class="mt-2 bg-white divide-y divide-gray-100 rounded-lg shadow-sm dark:bg-gray-700 dark:divide-gray-600">
-                                    <ul class="block py-2 text-sm text-center text-gray-700 dark:text-gray-400">
-                                        <li><router-link to="/tools/split" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400">Split Complex</router-link></li>
-                                        <li><router-link to="/tools/extract" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400">Extract Fragment</router-link></li>
+                                        <li v-for="item in menu.items" :key="item.name">
+                                            <router-link :to="item.path" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400 text-gray-700 dark:text-gray-400">{{ item.name }}</router-link>
+                                        </li>
                                     </ul>
                                 </div>
                             </div>
                         </li>
 
-                        <li><router-link to="/contact-map" class="hover:text-blue-700 dark:hover:text-blue-400">Contact Map</router-link></li>
-                        <li><router-link to="/viewer" class="hover:text-blue-700 dark:hover:text-blue-400">Viewer</router-link></li>
-                        <li class="relative" @mouseenter="openAbout = true" @mouseleave="openAbout = false">
+                        <li>
+                            <router-link to="/contact-map" class="hover:text-blue-700 dark:hover:text-blue-400">Contact Map</router-link>
+                        </li>
+                        <li>
+                            <router-link to="/viewer" class="hover:text-blue-700 dark:hover:text-blue-400">Viewer</router-link>
+                        </li>
+                        <li class="relative" @mouseenter="activeMenu = 'About'" @mouseleave="activeMenu = null">
                             <button class="flex items-center space-x-2 hover:text-blue-700 dark:hover:text-blue-400">
                                 About
                                 <svg class="w-2.5 h-2.5 ms-2.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 10 6">
                                     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4" />
                                 </svg>
                             </button>
-                            <div v-show="openAbout" class="absolute w-40 left-1/2 transform -translate-x-1/2 font-normal z-50">
+                            <div v-show="activeMenu === 'About'" class="absolute w-40 left-1/2 transform -translate-x-1/2 font-normal z-50">
                                 <div class="mt-2 bg-white divide-y divide-gray-100 rounded-lg shadow-sm dark:bg-gray-700 dark:divide-gray-600">
                                     <ul class="block py-2 text-sm text-center text-gray-700 dark:text-gray-400">
                                         <li>
@@ -123,7 +113,3 @@ const openAbout = ref(false);
         </footer>
     </div>
 </template>
-
-<style scoped>
-/* 可以在此处添加微调样式 */
-</style>

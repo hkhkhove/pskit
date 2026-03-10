@@ -16,7 +16,7 @@ export default defineConfig({
     plugins: () => [wasm(), topLevelAwait()],
   },
   optimizeDeps: {
-    exclude: ["@local/pskit-wasm", "echarts"],
+    exclude: ["@local/pskit-wasm"],
   },
   resolve: {
     alias: {

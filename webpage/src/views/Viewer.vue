@@ -1,14 +1,14 @@
 <script setup>
-import { onMounted, ref, computed, onBeforeUnmount, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import InputStructure from "../components/InputStructure.vue";
-import { ensurePdbeMolstarLoaded, createPdbeMolstarViewer, renderPdbeMolstar } from "../utils/pdbeMolstar.js";
+import { renderPdbeMolstar } from "../utils/pdbeMolstar.js";
+import { useMolstar } from "../composables/useMolstar.js";
 
 const route = useRoute();
 const router = useRouter();
 
-const viewerContainer = ref(null);
-let viewerInstance = null;
+const { viewerContainer, initViewer, getViewerInstance, revokeViewerObjectUrl } = useMolstar();
 
 const input_method = ref("id");
 const id = ref("");
@@ -25,7 +25,7 @@ watch(
             file_object_url.value = URL.createObjectURL(nextFiles[0]);
         }
     },
-    { deep: true }
+    { deep: true }, //深度监听文件数组的变化
 );
 
 const options = ref({});
@@ -72,43 +72,23 @@ async function handleViewClick() {
     }
     options.value = nextOptions;
 
-    // Switch to viewer view via URL state so the browser back button returns to the form.
     const q = { ...route.query, view: "viewer" };
     await router.push({ query: q });
 }
 
 async function renderCurrent() {
-    if (!viewerInstance || !viewerContainer.value) return;
+    if (!viewerContainer.value) return;
     const nextOptions = buildViewerOptions();
     if (!nextOptions) return;
     options.value = nextOptions;
+    const viewerInstance = await initViewer();
     renderPdbeMolstar(viewerInstance, viewerContainer.value, options.value);
 }
-
-onMounted(async () => {
-    await ensurePdbeMolstarLoaded();
-    viewerInstance = createPdbeMolstarViewer();
-});
-
-onBeforeUnmount(async () => {
-    try {
-        await viewerInstance?.clear?.();
-    } catch {
-        // ignore
-    }
-    viewerInstance = null;
-
-    if (file_object_url.value) {
-        URL.revokeObjectURL(file_object_url.value);
-        file_object_url.value = "";
-    }
-});
 
 watch(
     () => route.query.view,
     async (v) => {
         if (v !== "viewer") return;
-        // If the user refreshes / visits with ?view=viewer but has no input state, fall back to form.
         if (!buildViewerOptions()) {
             await goToFormView();
             return;
@@ -116,12 +96,12 @@ watch(
         await nextTick();
         await renderCurrent();
     },
-    { immediate: true }
+    { immediate: true },
 );
 </script>
 <template>
     <!-- Form view -->
-    <div v-if="!is_viewer_view" class="max-w-3xl mx-auto py-8 px-4">
+    <div v-show="!is_viewer_view" class="max-w-3xl mx-auto py-8 px-4">
         <div class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
             <div class="flex w-full justify-start">
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">
@@ -147,8 +127,8 @@ watch(
         </div>
     </div>
 
-    <!-- Viewer view (full screen) -->
-    <div v-else class="h-screen w-full">
+    <!-- Viewer view -->
+    <div v-show="is_viewer_view" class="h-screen w-full">
         <!-- <div class="absolute left-0 top-0 z-10 w-full px-4 py-3">
             <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white/90 px-4 py-2 shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/80">
                 <div class="text-sm font-semibold text-gray-900 dark:text-gray-200">Mol* Viewer</div>

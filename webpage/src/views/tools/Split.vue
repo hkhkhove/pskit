@@ -1,239 +1,60 @@
 <script setup>
-import { ref, computed, onBeforeUnmount, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import InputStructure from "../../components/InputStructure.vue";
-import { parsePdbIds, isValidPdbId, revokeDownloadItems, groupDownloadItemsBySource, prepareInputsFromFiles, prepareInputsFromPdbIds, runBatch, splitComplexInWorker, splitByChainInWorker, workerChunksToDownloadItems, downloadGroupedAsZip, stripExtension, getFormatFromFileName } from "../../utils/wasmBatch.js";
-import { ensurePdbeMolstarLoaded, createPdbeMolstarViewer, renderPdbeMolstar, applySelectionWithRetry, waitForStructureReady, molstarFormatFromPskitFormat, createBlobUrlFromBytes } from "../../utils/pdbeMolstar.js";
-import Loading from "../../components/Loading.vue";
+import TaskLayout from "../../components/TaskLayout.vue";
+import { splitComplexInWorker, splitByChainInWorker, workerChunksToDownloadItems, stripExtension, getFormatFromFileName, isValidPdbId } from "../../utils/wasmBatch.js";
+import { renderPdbeMolstar, applySelectionWithRetry, waitForStructureReady, molstarFormatFromPskitFormat, createBlobUrlFromBytes } from "../../utils/pdbeMolstar.js";
+import { pdbIdFromSource, molstarFormatFromFileName, inferChainSelectorFromStructureText } from "../../utils/structureUtils.js";
+import { useMolstar, MOLSTAR_COLORS } from "../../composables/useMolstar.js";
+import { useBatchTask } from "../../composables/useBatchTask.js";
 
 const route = useRoute();
 const router = useRouter();
 
-const MOLSTAR_COLORS = {
-    nonSelected: { r: 190, g: 190, b: 190 },
-    highlight: { r: 52, g: 152, b: 219 },
-};
+const { viewerContainer, initViewer, getViewerInstance, revokeViewerObjectUrl, idStructureCache, getViewerStructureKey, setViewerStructureKey, setViewerLastObjectUrl } = useMolstar();
+const { input_method, ids, files, processing, error_message, results, file_errors, last_run_input_method, is_results_view, has_results, grouped_results, can_download_all, run_button_text, executeBatchTask, downloadAllAsZip } = useBatchTask();
 
-const input_method = ref("file");
-const ids = ref("");
-const files = ref([]);
 const split_type = ref("chain");
-const processing = ref(false);
-const error_message = ref("");
-const results = ref([]);
-const file_errors = ref([]);
-const progress = ref({ current: 0, total: 0, current_file: "" });
-const last_run_input_method = ref("file");
-
-const viewerContainer = ref(null);
-let viewerInstance = null;
-let viewerLastObjectUrl = null;
-let viewerStructureKey = "";
-let idStructureCache = new Map();
-
 const selected_result = ref(null);
 
-function revokeViewerObjectUrl() {
-    if (!viewerLastObjectUrl) return;
-    try {
-        URL.revokeObjectURL(viewerLastObjectUrl);
-    } catch {
-        // ignore
-    }
-    viewerLastObjectUrl = null;
+async function triggerDownloadAll() {
+    const zipName = split_type.value === "chain" ? "split_by_chain_results.zip" : "split_results.zip";
+    await downloadAllAsZip(zipName);
 }
-
-function pdbIdFromSource(source) {
-    const base = stripExtension(String(source || ""))
-        .trim()
-        .toLowerCase();
-    return isValidPdbId(base) ? base : "";
-}
-
-function molstarFormatFromFileName(name) {
-    const ext = getFormatFromFileName(String(name || ""));
-    if (ext === "cif") return "mmcif";
-    return "pdb";
-}
-
-function tokenizeCifLine(line) {
-    return (line.match(/'[^']*'|"[^"]*"|\S+/g) || []).map((t) => t.replace(/^['"]|['"]$/g, ""));
-}
-
-function inferChainSelectorFromStructureText(text, format) {
-    const fmt = String(format || "").toLowerCase();
-    if (fmt === "pdb") {
-        const ids = new Set();
-        const lines = String(text || "").split(/\r?\n/);
-        for (const line of lines) {
-            if (!line || line.length < 22) continue;
-            if (!(line.startsWith("ATOM") || line.startsWith("HETATM"))) continue;
-            const c = String(line[21] || "").trim();
-            if (c) ids.add(c);
-        }
-        return { field: "auth_asym_id", ids: Array.from(ids) };
-    }
-
-    const lines = String(text || "").split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() !== "loop_") continue;
-
-        const headers = [];
-        let j = i + 1;
-        for (; j < lines.length; j++) {
-            const s = lines[j].trim();
-            if (!s) continue;
-            if (!s.startsWith("_")) break;
-            if (s.startsWith("_atom_site.")) headers.push(s);
-        }
-
-        if (headers.length === 0) continue;
-        const authIdx = headers.findIndex((h) => h === "_atom_site.auth_asym_id");
-        const labelIdx = headers.findIndex((h) => h === "_atom_site.label_asym_id");
-        const colIdx = authIdx >= 0 ? authIdx : labelIdx;
-        if (colIdx < 0) continue;
-
-        const field = authIdx >= 0 ? "auth_asym_id" : "struct_asym_id";
-        const ids = new Set();
-        for (; j < lines.length; j++) {
-            const s = lines[j].trim();
-            if (!s) continue;
-            if (s === "#" || s === "loop_" || s.startsWith("_")) break;
-            const tokens = tokenizeCifLine(s);
-            if (tokens.length <= colIdx) continue;
-            const v = String(tokens[colIdx] || "").trim();
-            if (v && v !== "." && v !== "?") ids.add(v);
-        }
-
-        return { field, ids: Array.from(ids) };
-    }
-
-    return { field: "auth_asym_id", ids: [] };
-}
-
-onBeforeUnmount(() => {
-    revokeDownloadItems(results.value);
-    revokeViewerObjectUrl();
-    idStructureCache = new Map();
-    try {
-        viewerInstance?.clear?.();
-    } catch {
-        // ignore
-    }
-    viewerInstance = null;
-});
-const parsed_ids = computed(() => parsePdbIds(ids.value));
-const ids_valid = computed(() => {
-    if (parsed_ids.value.length === 0) return false;
-    return parsed_ids.value.every(isValidPdbId);
-});
-
-const progress_text = computed(() => {
-    if (!processing.value || progress.value.total === 0) return "";
-    return `(${progress.value.current}/${progress.value.total}) ${progress.value.current_file}`;
-});
-
-const is_results_view = computed(() => route.query.view === "results");
-
-const run_button_text = computed(() => {
-    if (!processing.value) return "Run";
-    // When using PDB IDs, we first download structures in prepareInputsFromPdbIds().
-    // During that phase, we have no batch progress yet.
-    if (input_method.value === "id" && progress.value.total === 0) return "Downloading PDB files by ID...";
-    return progress_text.value ? `Processing... ${progress_text.value}` : "Processing...";
-});
 
 async function runSplit() {
-    error_message.value = "";
-    file_errors.value = [];
-    progress.value = { current: 0, total: 0, current_file: "" };
-    //清理之前的结果
-    revokeDownloadItems(results.value);
-    results.value = [];
-
-    if (input_method.value === "file") {
-        if (files.value.length === 0) {
-            error_message.value = "Please upload at least one structure file (.pdb or .cif).";
-            return;
-        }
-    } else if (input_method.value === "id") {
-        if (parsed_ids.value.length === 0) {
-            error_message.value = "Please enter at least one PDB ID (separated by commas).";
-            return;
-        }
-        if (!ids_valid.value) {
-            error_message.value = "PDB ID format is incorrect: must be 4 alphanumeric characters (separated by commas).";
-            return;
-        }
-    } else {
-        error_message.value = "Please select an input method (ID or file).";
-        return;
-    }
-
-    last_run_input_method.value = input_method.value;
-    processing.value = true;
-    try {
-        const inputs = input_method.value === "file" ? await prepareInputsFromFiles(files.value) : await prepareInputsFromPdbIds(parsed_ids.value);
-
-        // ID mode optimization: keep downloaded bytes for Mol*; worker should use a copy.
-        idStructureCache = new Map();
-        if (last_run_input_method.value === "id") {
-            for (const input of inputs || []) {
-                const id = String(input?.base || "")
-                    .trim()
-                    .toLowerCase();
-                if (id && input?.bytes) idStructureCache.set(id, { bytes: input.bytes, format: input.format });
+    selected_result.value = null; // 重新提交前，先清空选中状态
+    await executeBatchTask({
+        onInputsPrepared: (inputs, lastInputMethod) => {
+            idStructureCache.clear();
+            if (lastInputMethod === "id") {
+                for (const input of inputs || []) {
+                    const id = String(input?.base || "")
+                        .trim()
+                        .toLowerCase();
+                    if (id && input?.bytes) {
+                        idStructureCache.set(id, { bytes: input.bytes, format: input.format });
+                    }
+                }
             }
-        }
-
-        const processOne = (input) => {
+        },
+        processOne: (input) => {
             const bytesForWorker = last_run_input_method.value === "id" ? input.bytes.slice() : input.bytes;
             if (split_type.value === "mol_type") {
                 return splitComplexInWorker(bytesForWorker, input.format);
             }
             return splitByChainInWorker(bytesForWorker, input.format);
-        };
-
-        const { downloads, errors } = await runBatch({
-            inputs,
-            processOne,
-            toDownloadItems: (result, input) =>
-                workerChunksToDownloadItems({
-                    items: result.items,
-                    base: input.base,
-                    format: input.format,
-                    source: input.source,
-                }),
-            onProgress: (p) => {
-                progress.value = p;
-            },
-        });
-
-        results.value = downloads;
-        file_errors.value = errors;
-
-        // Switch to results view via URL state so the browser back button returns to the form.
-        if ((downloads?.length || 0) > 0) {
-            const q = { ...route.query, view: "results" };
-            await router.push({ query: q });
-        }
-    } catch (e) {
-        error_message.value = e?.message ? String(e.message) : String(e);
-    } finally {
-        processing.value = false;
-        progress.value = { current: 0, total: 0, current_file: "" };
-    }
+        },
+        toDownloadItems: (result, input) =>
+            workerChunksToDownloadItems({
+                items: result.items,
+                base: input.base,
+                format: input.format,
+                source: input.source,
+            }),
+    });
 }
-
-const has_results = computed(() => results.value.length > 0);
-
-const grouped_results = computed(() => {
-    return groupDownloadItemsBySource(results.value);
-});
-
-const can_download_all = computed(() => {
-    return has_results.value && !processing.value;
-});
 
 const current_title = computed(() => {
     const r = selected_result.value;
@@ -251,6 +72,7 @@ function isSelected(item) {
 }
 
 async function applyGreyAndHighlightSplitPart(item) {
+    const viewerInstance = getViewerInstance();
     if (!viewerInstance) return;
     if (!item) return;
 
@@ -277,7 +99,10 @@ async function applyGreyAndHighlightSplitPart(item) {
     }
 
     if (selector.ids.length === 0) return;
-    const data = selector.ids.map((id) => ({ [selector.field]: id, color: MOLSTAR_COLORS.highlight }));
+    const data = selector.ids.map((id) => ({
+        [selector.field]: id,
+        color: MOLSTAR_COLORS.highlight,
+    }));
     await applySelectionWithRetry(viewerInstance, {
         data,
         nonSelectedColor: MOLSTAR_COLORS.nonSelected,
@@ -292,12 +117,7 @@ async function renderMolstarForSelected() {
     if (!viewerContainer.value) return;
 
     try {
-        await ensurePdbeMolstarLoaded();
-        await nextTick();
-
-        if (!viewerInstance) {
-            viewerInstance = createPdbeMolstarViewer();
-        }
+        const viewerInstance = await initViewer();
 
         let nextKey = "";
 
@@ -306,22 +126,20 @@ async function renderMolstarForSelected() {
             if (f) {
                 nextKey = `file:${f.name}`;
             } else {
-                const id = pdbIdFromSource(item.source);
+                const id = pdbIdFromSource(item.source, stripExtension, isValidPdbId);
                 if (id) nextKey = `id:${id}`;
             }
         } else {
-            const id = pdbIdFromSource(item.source);
+            const id = pdbIdFromSource(item.source, stripExtension, isValidPdbId);
             if (id) nextKey = `id:${id}`;
         }
-
         if (!nextKey) return;
 
-        if (viewerStructureKey !== nextKey) {
-            viewerStructureKey = nextKey;
+        if (getViewerStructureKey() !== nextKey) {
+            setViewerStructureKey(nextKey);
             error_message.value = "";
 
             const options = {};
-            // Changing structure: revoke any previous object URL now.
             revokeViewerObjectUrl();
 
             if (nextKey.startsWith("file:")) {
@@ -329,10 +147,10 @@ async function renderMolstarForSelected() {
                 const f = (files.value || []).find((x) => x?.name === fileName);
                 if (!f) return;
                 const url = URL.createObjectURL(f);
-                viewerLastObjectUrl = url;
+                setViewerLastObjectUrl(url);
                 options.customData = {
                     url,
-                    format: molstarFormatFromFileName(f.name),
+                    format: molstarFormatFromFileName(f.name, getFormatFromFileName),
                     binary: false,
                 };
             } else {
@@ -344,7 +162,7 @@ async function renderMolstarForSelected() {
                 );
                 if (cached?.bytes) {
                     const url = createBlobUrlFromBytes(cached.bytes);
-                    viewerLastObjectUrl = url;
+                    setViewerLastObjectUrl(url);
                     options.customData = {
                         url,
                         format: molstarFormatFromPskitFormat(cached.format),
@@ -357,9 +175,12 @@ async function renderMolstarForSelected() {
 
             await renderPdbeMolstar(viewerInstance, viewerContainer.value, options);
 
-            const ok = await waitForStructureReady(viewerInstance, { maxTries: 20, intervalMs: 150 });
+            const ok = await waitForStructureReady(viewerInstance, {
+                maxTries: 20,
+                intervalMs: 150,
+            });
             if (!ok) {
-                error_message.value = "Mol* 未能加载结构（请检查输入结构格式，.cif 需要 mmCIF；或打开浏览器控制台查看网络请求是否失败）。";
+                error_message.value = "Failed to load structure in viewer.";
                 return;
             }
         }
@@ -393,13 +214,12 @@ watch(
     { flush: "post" },
 );
 
-// When navigating back/forward into results view, ensure the viewer is rendered.
 watch(
     () => is_results_view.value,
     async (v) => {
         if (!v) return;
         if (!has_results.value) return;
-        await nextTick();
+        await nextTick(); // 等 DOM 更新，确保 viewerContainer 可用
         if (!selected_result.value) {
             selected_result.value = grouped_results.value?.[0]?.items?.[0] ?? null;
         }
@@ -408,8 +228,6 @@ watch(
     { flush: "post" },
 );
 
-// If the user refreshes or directly visits SplitComplex?view=results, we may have no
-// in-memory results. In that case, fall back to the form view.
 watch(
     () => route.query.view,
     (v) => {
@@ -420,85 +238,59 @@ watch(
         delete q.view;
         router.replace({ query: q });
     },
-    { immediate: true },
+    { immediate: true }, // 带 immediate：变量“在不在”都先执行一次，以后“变了”再执行
 );
-
-async function downloadAllAsZip() {
-    if (!can_download_all.value) return;
-
-    try {
-        const zipName = split_type.value === "chain" ? "split_by_chain_results.zip" : "split_results.zip";
-        await downloadGroupedAsZip(grouped_results.value, zipName);
-    } catch (e) {
-        error_message.value = e?.message ? String(e.message) : String(e);
-    }
-}
 </script>
 <template>
-    <div class="mx-auto py-8 px-4" :class="is_results_view && has_results ? 'max-w-full' : 'max-w-3xl'">
-        <div v-if="is_results_view && has_results" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <!-- Left: structure viewer -->
-            <div class="w-full bg-white rounded-lg shadow-xl p-6 dark:bg-gray-900">
-                <div class="flex items-center justify-between gap-3">
-                    <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Structure</p>
-                    <div class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ current_title }}</div>
-                </div>
-                <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
-
-                <div class="w-full rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" style="height: 720px; position: relative">
-                    <div ref="viewerContainer" class="w-full h-full" style="height: 100%; width: 100%; position: relative"></div>
+    <TaskLayout title="Split Complex" :processing="processing" :runButtonText="run_button_text" :errorMessage="error_message" :fileErrors="file_errors" :isResultsView="is_results_view" :hasResults="has_results" @submit="runSplit">
+        <template #viewer>
+            <div class="flex items-center justify-between gap-3">
+                <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Structure</p>
+                <div class="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    {{ current_title }}
                 </div>
             </div>
+            <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-            <!-- Right: results -->
-            <div class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
-                <div class="flex items-center justify-between gap-3">
-                    <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Results</p>
-                    <button v-if="can_download_all" class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_download_all" @click="downloadAllAsZip">Download All (ZIP)</button>
-                </div>
-                <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
+            <div class="w-full rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" style="height: 720px; position: relative">
+                <div ref="viewerContainer" class="w-full h-full" style="height: 100%; width: 100%; position: relative"></div>
+            </div>
+        </template>
 
-                <div class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 max-h-screen overflow-y-auto">
-                    <div class="space-y-4">
-                        <div v-for="g in grouped_results" :key="g.source">
-                            <div class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-200">{{ g.source }}</div>
-                            <ul class="space-y-2">
-                                <li v-for="r in g.items" :key="r.filename" class="flex items-center justify-between rounded-lg px-2 py-2 cursor-pointer" :class="isSelected(r) ? 'bg-blue-50 ring-2 ring-blue-200 dark:bg-blue-950/40 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-700/40'" @click="selectResultItem(r)">
-                                    <div class="min-w-0">
-                                        <div class="truncate text-sm font-medium text-gray-900 dark:text-gray-200">{{ r.filename }}</div>
-                                        <div class="text-xs text-gray-500 dark:text-gray-300">key: {{ r.key }} · {{ (r.size / 1024).toFixed(2) }} KB</div>
-                                    </div>
-                                    <a class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :href="r.url" :download="r.filename" @click.stop> Download </a>
-                                </li>
-                            </ul>
+        <template #results>
+            <div class="flex items-center justify-between gap-3">
+                <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Results</p>
+                <button v-if="can_download_all" class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_download_all" @click="triggerDownloadAll">Download All (ZIP)</button>
+            </div>
+            <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
+
+            <div class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 max-h-screen overflow-y-auto">
+                <div class="space-y-4">
+                    <div v-for="g in grouped_results" :key="g.source">
+                        <div class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-200">
+                            {{ g.source }}
                         </div>
+                        <ul class="space-y-2">
+                            <li v-for="r in g.items" :key="r.filename" class="flex items-center justify-between rounded-lg px-2 py-2 cursor-pointer" :class="isSelected(r) ? 'bg-blue-50 ring-2 ring-blue-200 dark:bg-blue-950/40 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-700/40'" @click="selectResultItem(r)">
+                                <div class="min-w-0">
+                                    <div class="truncate text-sm font-medium text-gray-900 dark:text-gray-200">
+                                        {{ r.filename }}
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-300">key: {{ r.key }} · {{ (r.size / 1024).toFixed(2) }} KB</div>
+                                </div>
+                                <a class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :href="r.url" :download="r.filename" @click.stop> Download </a>
+                            </li>
+                        </ul>
                     </div>
                 </div>
-
-                <div v-if="error_message" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                    {{ error_message }}
-                </div>
-
-                <div v-if="file_errors.length > 0" class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950 dark:text-yellow-200">
-                    <div class="font-medium">Failed to process the following file(s):</div>
-                    <ul class="mt-2 space-y-1">
-                        <li v-for="e in file_errors" :key="e.source" class="text-xs">
-                            <span class="font-semibold">{{ e.source }}</span
-                            >: {{ e.message }}
-                        </li>
-                    </ul>
-                </div>
             </div>
-        </div>
+        </template>
 
-        <form v-else @submit.prevent="runSplit" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
-            <div class="flex w-full justify-start">
-                <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Split Complex</p>
-            </div>
-            <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
+        <template #input>
             <InputStructure v-model:input_method="input_method" v-model:ids="ids" v-model:files="files" :max-files="200" :max-size="500 * 1024 * 1024" />
-            <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
-            <!--split type: "by chain" or "by type" (protein or nucleic acid)-->
+        </template>
+
+        <template #custom-params>
             <div class="my-4">
                 <span class="text-xl font-semibold text-gray-900 dark:text-gray-400">Split Type</span>
             </div>
@@ -524,25 +316,6 @@ async function downloadAllAsZip() {
                     </li>
                 </ul>
             </div>
-            <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
-            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed" :disabled="processing" :aria-busy="processing">
-                <Loading v-if="processing" class="h-5 w-5 text-white" />
-                <span>{{ run_button_text }}</span>
-            </button>
-
-            <div v-if="error_message" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-                {{ error_message }}
-            </div>
-
-            <div v-if="file_errors.length > 0" class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950 dark:text-yellow-200">
-                <div class="font-medium">Failed to process the following file(s):</div>
-                <ul class="mt-2 space-y-1">
-                    <li v-for="e in file_errors" :key="e.source" class="text-xs">
-                        <span class="font-semibold">{{ e.source }}</span
-                        >: {{ e.message }}
-                    </li>
-                </ul>
-            </div>
-        </form>
-    </div>
+        </template>
+    </TaskLayout>
 </template>

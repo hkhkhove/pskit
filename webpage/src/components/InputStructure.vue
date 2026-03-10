@@ -91,26 +91,7 @@ const handleFiles = (event) => {
     if (file_disabled.value) return;
     fileLimitWarning.value = "";
     let selectedFiles = Array.from(event.target.files);
-    selectedFiles = selectedFiles.filter(isValidFileType);
-    if (!props.multiple && selectedFiles.length > 0) {
-        files.value = [selectedFiles[0]];
-    } else {
-        let currentSize = totalSize.value;
-        for (const file of selectedFiles) {
-            if (files.value.length >= props.maxFiles) {
-                fileLimitWarning.value = `Maximum ${props.maxFiles} files allowed. Some files were not added.`;
-                break;
-            }
-            if (currentSize + file.size > props.maxSize) {
-                fileLimitWarning.value = `Total size limit (${formatSize(props.maxSize)}) exceeded. Some files were not added.`;
-                break;
-            }
-            if (!isDuplicate(file)) {
-                files.value.push(file);
-                currentSize += file.size;
-            }
-        }
-    }
+    addFiles(selectedFiles);
     event.target.value = "";
 };
 
@@ -119,12 +100,16 @@ const handleDrop = (event) => {
     dragging.value = false;
     fileLimitWarning.value = "";
     let droppedFiles = Array.from(event.dataTransfer.files);
-    droppedFiles = droppedFiles.filter(isValidFileType);
-    if (!props.multiple && droppedFiles.length > 0) {
-        files.value = [droppedFiles[0]];
+    addFiles(droppedFiles);
+};
+
+const addFiles = (newFiles) => {
+    newFiles = newFiles.filter(isValidFileType);
+    if (!props.multiple && newFiles.length > 0) {
+        files.value = [newFiles[0]];
     } else {
         let currentSize = totalSize.value;
-        for (const file of droppedFiles) {
+        for (const file of newFiles) {
             if (files.value.length >= props.maxFiles) {
                 fileLimitWarning.value = `Maximum ${props.maxFiles} files allowed. Some files were not added.`;
                 break;
@@ -169,12 +154,17 @@ defineExpose({
                 <input id="id" type="radio" value="id" v-model="input_method" class="h-4 w-4 accent-blue-600" />
                 <div class="ms-2 flex items-center gap-2">
                     <label for="id" class="text-sm font-medium text-gray-900 dark:text-gray-300">
-                        Input the PDB IDs of the structures. <span @click="ids_example" class="text-xs cursor-pointer hover:text-blue-700 hover:underline font-normal"> {{ ids_example_text() }} </span></label
+                        Input the PDB IDs of the structures.
+                        <span @click="ids_example" class="text-xs cursor-pointer hover:text-blue-700 hover:underline font-normal">
+                            {{ ids_example_text() }}
+                        </span></label
                     >
                 </div>
             </div>
             <input :disabled="id_disabled" type="text" v-model="ids" :class="{ 'cursor-not-allowed opacity-50 bg-gray-200': id_disabled }" class="w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400" />
-            <p v-if="!ids_valid" class="mt-2 text-sm text-red-600 dark:text-red-500">{{ ids_error_message }}</p>
+            <p v-if="!ids_valid" class="mt-2 text-sm text-red-600 dark:text-red-500">
+                {{ ids_error_message }}
+            </p>
         </div>
 
         <div class="flex flex-row flex-wrap">
@@ -186,7 +176,13 @@ defineExpose({
                 </div>
                 <div class="flex items-center justify-center" @dragover.prevent="dragOver" @dragleave.prevent="dragLeave" @drop.prevent="handleDrop">
                     <input :disabled="file_disabled" id="dropzone-file" type="file" class="hidden" :multiple="multiple" accept=".pdb,.cif" @change="handleFiles" />
-                    <label for="dropzone-file" :class="{ 'cursor-not-allowed opacity-50 bg-gray-200': file_disabled, 'bg-gray-100': dragging }" class="flex h-64 w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-gray-500 dark:hover:bg-gray-600">
+                    <label
+                        for="dropzone-file"
+                        :class="{
+                            'cursor-not-allowed opacity-50 bg-gray-200': file_disabled,
+                            'bg-gray-100': dragging,
+                        }"
+                        class="flex h-64 w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-gray-500 dark:hover:bg-gray-600">
                         <div class="flex flex-col items-center justify-center pt-5 pb-6">
                             <svg class="mb-4 h-8 w-8 text-gray-500 dark:text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
                                 <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2" />
@@ -196,7 +192,9 @@ defineExpose({
                         </div>
                     </label>
                 </div>
-                <p v-if="fileLimitWarning" class="mt-2 text-sm text-amber-600 dark:text-amber-500">{{ fileLimitWarning }}</p>
+                <p v-if="fileLimitWarning" class="mt-2 text-sm text-amber-600 dark:text-amber-500">
+                    {{ fileLimitWarning }}
+                </p>
                 <p v-if="multiple" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ files.length }}/{{ maxFiles }} files, {{ formatSize(totalSize) }}/{{ formatSize(maxSize) }}</p>
             </div>
 

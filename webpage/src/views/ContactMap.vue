@@ -1,28 +1,20 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import JSZip from "jszip";
-import InputStructure from "../components/InputStructure.vue";
-import { parsePdbIds, isValidPdbId, prepareInputsFromFiles, prepareInputsFromPdbIds, runBatch, dMapInWorker, sanitizeKey } from "../utils/wasmBatch.js";
 import Loading from "../components/Loading.vue";
+import InputStructure from "../components/InputStructure.vue";
+import { dMapInWorker, sanitizeKey } from "../utils/wasmBatch.js";
+import { useBatchTask } from "../composables/useBatchTask.js";
 
 const route = useRoute();
 const router = useRouter();
 
-const input_method = ref("file");
-const ids = ref("");
-const files = ref([]);
+const { input_method, ids, files, processing, error_message, results, file_errors, is_results_view, has_results, run_button_text, executeBatchTask, grouped_results, can_download_all } = useBatchTask();
 
 const chain_id = ref("");
 function chain_id_example() {
     chain_id.value = "A";
 }
-
-const processing = ref(false);
-const error_message = ref("");
-const results = ref([]);
-const file_errors = ref([]);
-const progress = ref({ current: 0, total: 0, current_file: "" });
 
 const current_index = ref(0);
 
@@ -38,31 +30,9 @@ let last_offscreen = null;
 let last_meta = null;
 let render_token = 0;
 
-const parsed_ids = computed(() => parsePdbIds(ids.value));
-const ids_valid = computed(() => {
-    if (parsed_ids.value.length === 0) return false;
-    return parsed_ids.value.every(isValidPdbId);
-});
-
-const progress_text = computed(() => {
-    if (!processing.value || progress.value.total === 0) return "";
-    return `(${progress.value.current}/${progress.value.total}) ${progress.value.current_file}`;
-});
-
-const is_results_view = computed(() => route.query.view === "results");
-
-const run_button_text = computed(() => {
-    if (!processing.value) return "Run";
-    // When using PDB IDs, we first download structures in prepareInputsFromPdbIds().
-    // During that phase, we have no batch progress yet.
-    if (input_method.value === "id" && progress.value.total === 0) return "Downloading PDB files by ID...";
-    return progress_text.value ? `Processing... ${progress_text.value}` : "Processing...";
-});
-
 function csvFilename(base) {
     const c = chain_id.value.trim();
     const cPart = c ? sanitizeKey(c) : "all";
-    // If the rendered matrix is downsampled, append ds{n} for clarity.
     const cur = current_result.value;
     const ds = cur?.original_n && cur.original_n > cur.n ? `.ds${cur.n}` : "";
     return `${base}.d_map.${cPart}.matrix${ds}.csv`;
@@ -77,9 +47,6 @@ function pngFilename(base) {
 }
 
 function upperIndex(n, i, j) {
-    // Index into packed upper triangle (excluding diagonal), row-major by i then j.
-    // i<j, 0-based.
-    // prefix = sum_{r=0}^{i-1} (n-r-1) = i*(2n-i-1)/2
     return (i * (2 * n - i - 1)) / 2 + (j - i - 1);
 }
 
@@ -111,116 +78,33 @@ function maxFinite(arr) {
     return m;
 }
 
-function toCsvRow(values) {
-    return values
-        .map((v) => {
-            const s = v === null || v === undefined ? "" : String(v);
-            const escaped = s.replaceAll('"', '""');
-            return /[\n\r,\"]/g.test(escaped) ? `"${escaped}"` : escaped;
-        })
-        .join(",");
-}
-
-function downloadTextFile({ text, filename, mime = "text/csv;charset=utf-8" }) {
-    const blob = new Blob([text], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-}
-
-function uniqueZipName(name, used) {
-    const clean = String(name).replace(/[/\\]+/g, "_");
-    if (!used.has(clean)) {
-        used.add(clean);
-        return clean;
-    }
-    let i = 2;
-    while (used.has(`${clean} (${i})`)) i++;
-    const finalName = `${clean} (${i})`;
-    used.add(finalName);
-    return finalName;
-}
-
 async function runDMap() {
-    error_message.value = "";
-    file_errors.value = [];
-    progress.value = { current: 0, total: 0, current_file: "" };
-    results.value = [];
+    const chainArg = chain_id.value.trim() ? chain_id.value.trim() : undefined;
     current_index.value = 0;
 
-    if (input_method.value === "file") {
-        if (files.value.length === 0) {
-            error_message.value = "Please upload at least one structure file (.pdb or .cif).";
-            return;
-        }
-    } else if (input_method.value === "id") {
-        if (parsed_ids.value.length === 0) {
-            error_message.value = "Please enter at least one PDB ID (separated by commas).";
-            return;
-        }
-        if (!ids_valid.value) {
-            error_message.value = "PDB ID format is incorrect: must be 4 alphanumeric characters (separated by commas).";
-            return;
-        }
-    } else {
-        error_message.value = "Please select an input method (ID or file).";
-        return;
-    }
-
-    processing.value = true;
-    try {
-        const inputs = input_method.value === "file" ? await prepareInputsFromFiles(files.value) : await prepareInputsFromPdbIds(parsed_ids.value);
-        const chainArg = chain_id.value.trim() ? chain_id.value.trim() : undefined;
-
-        const { downloads, errors } = await runBatch({
-            inputs,
-            processOne: (input) => dMapInWorker(input.bytes, chainArg, input.format),
-            toDownloadItems: (result, input) => {
-                const axis = normalizeAxis(result.axis || []);
-                const n = axis.length;
-                const upper = normalizeUpperValues(result.values || new Float64Array());
-                const maxVal = maxFinite(upper);
-                return [
-                    {
-                        source: input.source,
-                        base: input.base,
-                        chain_id: chainArg ?? "",
-                        axis,
-                        n,
-                        upper_values: upper,
-                        vmax: Number.isFinite(maxVal) ? maxVal : 0,
-                        original_n: n,
-                        downsample_stride: 1,
-                    },
-                ];
-            },
-            onProgress: (p) => {
-                progress.value = p;
-            },
-        });
-
-        results.value = downloads;
-        file_errors.value = errors;
-
-        // Switch to results view via URL state so the browser back button returns to the form.
-        if ((downloads?.length || 0) > 0) {
-            const q = { ...route.query, view: "results" };
-            await router.push({ query: q });
-        }
-    } catch (e) {
-        error_message.value = e?.message ? String(e.message) : String(e);
-    } finally {
-        processing.value = false;
-        progress.value = { current: 0, total: 0, current_file: "" };
-    }
+    await executeBatchTask({
+        processOne: (input) => dMapInWorker(input.bytes, chainArg, input.format),
+        toDownloadItems: (result, input) => {
+            const axis = normalizeAxis(result.axis || []);
+            const n = axis.length;
+            const upper = normalizeUpperValues(result.values || new Float64Array());
+            const maxVal = maxFinite(upper);
+            return [
+                {
+                    source: input.source,
+                    base: input.base,
+                    chain_id: chainArg ?? "",
+                    axis,
+                    n,
+                    upper_values: upper,
+                    vmax: Number.isFinite(maxVal) ? maxVal : 0,
+                    original_n: n,
+                    downsample_stride: 1,
+                },
+            ];
+        },
+    });
 }
-
-const has_results = computed(() => results.value.length > 0);
 
 const has_multiple_results = computed(() => results.value.length > 1);
 
@@ -249,9 +133,9 @@ const can_download = computed(() => {
     return !!current_result.value && !processing.value;
 });
 
-const can_download_all = computed(() => {
-    return has_results.value && !processing.value;
-});
+function toCsvRow(arr) {
+    return arr.join(",");
+}
 
 function csvTextForResult(res) {
     const axis = Array.isArray(res?.axis) ? res.axis : [];
@@ -276,6 +160,18 @@ function csvTextForResult(res) {
         lines.push(toCsvRow(row));
     }
     return lines.join("\n") + "\n";
+}
+
+function downloadTextFile({ text, filename }) {
+    const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 function downloadCurrent() {
@@ -329,31 +225,6 @@ function downloadHeatmapPng() {
             "image/png",
             1.0,
         );
-    } catch (e) {
-        error_message.value = e?.message ? String(e.message) : String(e);
-    }
-}
-
-async function downloadAll() {
-    if (!can_download_all.value) return;
-
-    try {
-        const zip = new JSZip();
-        const used = new Set();
-        for (const res of results.value || []) {
-            const filename = csvFilename(res?.base || "results");
-            const safe = uniqueZipName(filename, used);
-            zip.file(safe, csvTextForResult(res));
-        }
-        const blob = await zip.generateAsync({ type: "blob" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "d_map_tables.zip";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
     } catch (e) {
         error_message.value = e?.message ? String(e.message) : String(e);
     }
@@ -413,8 +284,17 @@ function parseAxisEntry(s) {
     const i1 = text.indexOf("-");
     if (i1 < 0) return { chainId: text, seqId: "", seqName: "" };
     const i2 = text.indexOf("-", i1 + 1);
-    if (i2 < 0) return { chainId: text.slice(0, i1), seqId: text.slice(i1 + 1), seqName: "" };
-    return { chainId: text.slice(0, i1), seqId: text.slice(i1 + 1, i2), seqName: text.slice(i2 + 1) };
+    if (i2 < 0)
+        return {
+            chainId: text.slice(0, i1),
+            seqId: text.slice(i1 + 1),
+            seqName: "",
+        };
+    return {
+        chainId: text.slice(0, i1),
+        seqId: text.slice(i1 + 1, i2),
+        seqName: text.slice(i2 + 1),
+    };
 }
 
 function chainSegmentsFromAxisEntries(entries) {
@@ -772,7 +652,6 @@ watch(
                             <span class="whitespace-nowrap">%</span>
                         </div>
                         <button v-if="has_multiple_results" class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_next" @click="nextResult">Next</button>
-                        <button class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_download_all" @click="downloadAll">Download All (ZIP)</button>
                     </div>
                 </div>
                 <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
@@ -781,7 +660,9 @@ watch(
                     <div v-if="current_result" class="space-y-3">
                         <div class="flex justify-between">
                             <div>
-                                <div class="text-sm font-semibold text-gray-900 dark:text-gray-200">{{ current_title }}</div>
+                                <div class="text-sm font-semibold text-gray-900 dark:text-gray-200">
+                                    {{ current_title }}
+                                </div>
                                 <div class="text-xs text-gray-500 dark:text-gray-300">chain_id: {{ current_result.chain_id || "all" }} · render: {{ current_result.n }}×{{ current_result.n }}</div>
                             </div>
                             <div class="flex items-center gap-2">

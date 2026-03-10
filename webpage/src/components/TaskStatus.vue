@@ -26,7 +26,10 @@ const errorItems = ref({}); // 存储 error.json 中的错误项
 const polling = ref(false);
 const isLoading = ref(true);
 const fetchError = ref(null);
+const notFoundRetryCount = ref(0); //防止服务器还没来得及索引任务导致查询失败
 let pollInterval = null;
+
+const MAX_NOT_FOUND_RETRIES = 5;
 
 const isPending = computed(() => status.value === "pending");
 const isProcessing = computed(() => status.value === "processing");
@@ -40,23 +43,29 @@ const displayFiles = computed(() => resultFiles.value.filter((f) => f.filename !
 const hasErrorItems = computed(() => Object.keys(errorItems.value).length > 0);
 
 // Expose for parent component access
-defineExpose({
-    status,
-    resultFiles,
-    isCompleted,
-    isFailed,
-    isPending,
-    isProcessing,
-});
+// defineExpose({
+//     status,
+//     resultFiles,
+//     isCompleted,
+//     isFailed,
+//     isPending,
+//     isProcessing,
+// });
 
 async function fetchTaskStatus() {
     try {
         const response = await fetch(`/api/tasks/${props.taskId}`);
         if (!response.ok) {
             const errorText = await response.text();
+            if (response.status === 404 && notFoundRetryCount.value < MAX_NOT_FOUND_RETRIES) {
+                notFoundRetryCount.value += 1;
+                return;
+            }
             throw new Error(`[${response.status}]: ${errorText || "Unknown error"}`);
         }
         const data = await response.json();
+        notFoundRetryCount.value = 0;
+        fetchError.value = null;
 
         if (data.type === "Pending") {
             status.value = "pending";
@@ -73,7 +82,10 @@ async function fetchTaskStatus() {
             uploadTime.value = data.data?.upload_time || null;
             await fetchResults();
             stopPolling();
-            emit("completed", { files: resultFiles.value, errorItems: errorItems.value });
+            emit("completed", {
+                files: resultFiles.value,
+                errorItems: errorItems.value,
+            });
         } else if (data.type === "Failed") {
             status.value = "failed";
             errorMessage.value = data.data?.error || "Unknown error";
@@ -128,7 +140,9 @@ function startPolling() {
     if (polling.value) return;
     polling.value = true;
     fetchTaskStatus();
-    pollInterval = setInterval(fetchTaskStatus, 3000);
+    if (!pollInterval) {
+        pollInterval = setInterval(fetchTaskStatus, 3000);
+    }
 }
 
 function stopPolling() {
@@ -154,6 +168,14 @@ watch(
     () => props.taskId,
     (newId) => {
         if (newId) {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+            polling.value = false;
+            fetchError.value = null;
+            isLoading.value = true;
+            notFoundRetryCount.value = 0;
             startPolling();
         }
     },
@@ -254,8 +276,12 @@ onUnmounted(() => {
                 <div v-if="displayFiles.length > 0" class="space-y-3">
                     <div v-for="file in displayFiles" :key="file.filename" class="flex items-center justify-between p-3 bg-gray-50 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-700">
                         <div class="min-w-0 flex-1">
-                            <p class="text-sm font-medium text-gray-900 dark:text-gray-200 truncate">{{ file.filename }}</p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ formatFileSize(file.size) }}</p>
+                            <p class="text-sm font-medium text-gray-900 dark:text-gray-200 truncate">
+                                {{ file.filename }}
+                            </p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                {{ formatFileSize(file.size) }}
+                            </p>
                         </div>
                         <a :href="file.download_url" download class="ml-4 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition text-sm"> Download </a>
                     </div>

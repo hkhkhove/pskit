@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import traceback
+import time
 
 from .config import path
 from .feature import empirical_feats, esm2, saprot
@@ -68,7 +69,7 @@ class LMEmbed(BaseParams):
                 output_dir=self.output_dir,
                 path=path,
             )
-        else:
+        if self.model_type not in ["esm2", "saprot", "both"]:
             return {"model_type": f"Unknown model type: {self.model_type}"}
 
         all_error.update(esm2_error)
@@ -98,8 +99,8 @@ def main(params):
         _, download_error = download_pdb(ids_list, params["input_dir"])
         error.update(download_error)
 
-    print(f"[PSKit] Running task: {task_name}")
-    print(f"[PSKit] Params: {params}")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}][PSKit] Running task: {task_name}")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}][PSKit] Params: {params}")
 
     try:
         if task_name not in class_map:
@@ -111,7 +112,7 @@ def main(params):
         error["__main__"] = str(e) + "\n" + traceback.format_exc()
 
     if error:
-        print(f"[PSKit] Errors: {error}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}][PSKit] Errors: {error}")
         error_file = os.path.join(output_dir, "error.json")
         with open(error_file, "w") as f:
             json.dump(error, f, indent=4)
