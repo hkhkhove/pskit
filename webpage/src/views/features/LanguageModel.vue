@@ -31,7 +31,7 @@ async function triggerDownloadAll() {
 </script>
 
 <template>
-    <TaskLayout title="Language Model Embedding" :processing="isLoading" :errorMessage="submissionError" :isTaskView="is_task_view" :isResultsView="is_results_view" :hasResults="showResults" @submit="handleSubmit">
+    <TaskLayout title="Language Model Embedding" :processing="isLoading" :errorMessage="submissionError" :isTaskView="is_task_view" :isResultsView="is_results_view" :showResults="showResults" @submit="handleSubmit">
         <template #input>
             <InputStructure v-model:input_method="input_method" v-model:ids="ids" v-model:files="files" />
         </template>

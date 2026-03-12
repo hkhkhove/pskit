@@ -33,7 +33,7 @@ def get_seq(pdb_file):
         return seq, chain_id
 
 
-def predict(input_dir, output_dir, target_type):
+def main(input_dir, output_dir, target_type):
     error = {}
 
     device = torch.device("cpu")
@@ -124,4 +124,4 @@ def predict(input_dir, output_dir, target_type):
 
 
 if "__main__" == __name__:
-    predict("./", "./", "RNA")
+    main("./", "./", "RNA")

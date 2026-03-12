@@ -2,7 +2,7 @@ import { ref, computed, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { parsePdbIds, isValidPdbId, prepareInputsFromFiles, prepareInputsFromPdbIds, runBatch, revokeDownloadItems, groupDownloadItemsBySource, downloadGroupedAsZip } from "../utils/wasmBatch.js";
 
-export function useBatchTask() {
+export function useWasmTask() {
     const route = useRoute();
     const router = useRouter();
 
@@ -46,7 +46,7 @@ export function useBatchTask() {
         results.value = [];
     }
 
-    async function executeBatchTask({ processOne, toDownloadItems, onInputsPrepared }) {
+    async function executeWasmTask({ processOne, toDownloadItems, onInputsPrepared }) {
         resetTaskState();
 
         if (input_method.value === "file") {
@@ -119,6 +119,6 @@ export function useBatchTask() {
     return {
         input_method, ids, files, processing, error_message, results, file_errors, progress, last_run_input_method,
         parsed_ids, ids_valid, is_results_view, has_results, grouped_results, can_download_all,
-        progress_text, run_button_text, executeBatchTask, downloadAllAsZip, resetTaskState
+        progress_text, run_button_text, executeWasmTask, downloadAllAsZip, resetTaskState
     };
 }

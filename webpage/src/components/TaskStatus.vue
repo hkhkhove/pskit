@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from "vue";
+import { useRoute } from "vue-router";
 import Loading from "./Loading.vue";
 
 const props = defineProps({
@@ -15,7 +16,7 @@ const props = defineProps({
 
 const emit = defineEmits(["completed", "failed"]);
 
-const status = ref("pending");
+const status = ref("");
 const position = ref(null);
 const uploadTime = ref(null);
 const startTime = ref(null);
@@ -27,6 +28,7 @@ const polling = ref(false);
 const isLoading = ref(true);
 const fetchError = ref(null);
 const notFoundRetryCount = ref(0); //防止服务器还没来得及索引任务导致查询失败
+const copiedUrl = ref(false);
 let pollInterval = null;
 
 const MAX_NOT_FOUND_RETRIES = 5;
@@ -36,11 +38,23 @@ const isProcessing = computed(() => status.value === "processing");
 const isCompleted = computed(() => status.value === "completed");
 const isFailed = computed(() => status.value === "failed");
 
+const statusLabel = computed(() => {
+    if (isPending.value) return "Pending";
+    if (isProcessing.value) return "Processing";
+    if (isCompleted.value) return "Completed";
+    if (isFailed.value) return "Failed";
+    return "Fetching status...";
+});
+const statusColor = computed(() => {
+    if (isPending.value) return "text-violet-600";
+    if (isProcessing.value) return "text-blue-600";
+    if (isCompleted.value) return "text-green-600";
+    if (isFailed.value) return "text-red-600";
+    return "text-gray-600";
+});
+
 // 过滤掉 error.json，只显示其他文件
 const displayFiles = computed(() => resultFiles.value.filter((f) => f.filename !== "error.json"));
-
-// 是否有错误项
-const hasErrorItems = computed(() => Object.keys(errorItems.value).length > 0);
 
 // Expose for parent component access
 // defineExpose({
@@ -53,12 +67,15 @@ const hasErrorItems = computed(() => Object.keys(errorItems.value).length > 0);
 // });
 
 async function fetchTaskStatus() {
+    let shouldKeepLoading = false;
     try {
         const response = await fetch(`/api/tasks/${props.taskId}`);
         if (!response.ok) {
             const errorText = await response.text();
             if (response.status === 404 && notFoundRetryCount.value < MAX_NOT_FOUND_RETRIES) {
                 notFoundRetryCount.value += 1;
+                shouldKeepLoading = true;
+                console.log(`Task not found (attempt ${notFoundRetryCount.value}/${MAX_NOT_FOUND_RETRIES}). Retrying...`);
                 return;
             }
             throw new Error(`[${response.status}]: ${errorText || "Unknown error"}`);
@@ -100,6 +117,7 @@ async function fetchTaskStatus() {
         fetchError.value = error.message;
         stopPolling();
     } finally {
+        if (shouldKeepLoading) return;
         isLoading.value = false;
     }
 }
@@ -153,15 +171,30 @@ function stopPolling() {
     }
 }
 
-function formatFileSize(bytes) {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
-
 function formatDateTime(dateStr) {
     if (!dateStr) return "N/A";
     return new Date(dateStr).toLocaleString();
+}
+
+const currentTaskUrl = computed(() => {
+    if (typeof window === "undefined") return "";
+
+    const url = new URL(window.location.href);
+    return url.toString();
+});
+
+async function copyCurrentUrl() {
+    if (!currentTaskUrl.value) return;
+    try {
+        await navigator.clipboard.writeText(currentTaskUrl.value);
+        copiedUrl.value = true;
+        setTimeout(() => {
+            copiedUrl.value = false;
+        }, 2000);
+    } catch (error) {
+        console.error("Failed to copy task URL:", error);
+        copiedUrl.value = false;
+    }
 }
 
 watch(
@@ -209,15 +242,8 @@ onUnmounted(() => {
             <div class="grid grid-cols-2 gap-4 mb-6 border-b border-gray-300 pb-4">
                 <div>
                     <strong class="text-gray-600 dark:text-gray-400">Status: </strong>
-                    <span
-                        class="font-semibold"
-                        :class="{
-                            'text-violet-600': isPending,
-                            'text-blue-600': isProcessing,
-                            'text-green-600': isCompleted,
-                            'text-red-600': isFailed,
-                        }">
-                        {{ isPending ? "Pending" : isProcessing ? "Processing" : isCompleted ? "Completed" : "Failed" }}
+                    <span class="font-semibold" :class="statusColor">
+                        {{ statusLabel }}
                     </span>
                 </div>
                 <div class="dark:text-gray-500">
@@ -245,7 +271,12 @@ onUnmounted(() => {
                 </p>
                 <p v-else class="text-lg text-gray-600 dark:text-gray-400">Your task is being processed. Please wait...</p>
                 <p class="text-sm text-gray-400 dark:text-gray-500">The page will update automatically.</p>
-                <p class="text-sm text-gray-400 mb-4 dark:text-gray-500">You can bookmark this page to view your results later.</p>
+                <div class="mt-1 flex items-center justify-center gap-2 text-sm text-gray-400 dark:text-gray-500">
+                    <p>You can return later using this page link.</p>
+                    <button type="button" class="rounded-md border border-blue-200 bg-white px-2.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-900/40" @click="copyCurrentUrl">
+                        {{ copiedUrl ? "Copied" : "Copy Link" }}
+                    </button>
+                </div>
             </div>
 
             <!-- Task Failed -->
@@ -256,42 +287,7 @@ onUnmounted(() => {
                 </p>
             </div>
 
-            <!-- Task Completed -->
-            <div v-else-if="isCompleted">
-                <!-- Error items from error.json -->
-                <div v-if="hasErrorItems" class="mb-6">
-                    <h2 class="text-xl font-semibold text-red-600 dark:text-red-400 mb-4">Processing Errors</h2>
-                    <div class="space-y-2">
-                        <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
-                            <p class="text-sm font-medium text-red-800 dark:text-red-300">
-                                <span class="font-bold">{{ filename }}:</span> {{ message }}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-400 mb-4">Result Files</h2>
-
-                <!-- File list -->
-                <div v-if="displayFiles.length > 0" class="space-y-3">
-                    <div v-for="file in displayFiles" :key="file.filename" class="flex items-center justify-between p-3 bg-gray-50 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-700">
-                        <div class="min-w-0 flex-1">
-                            <p class="text-sm font-medium text-gray-900 dark:text-gray-200 truncate">
-                                {{ file.filename }}
-                            </p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">
-                                {{ formatFileSize(file.size) }}
-                            </p>
-                        </div>
-                        <a :href="file.download_url" download class="ml-4 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition text-sm"> Download </a>
-                    </div>
-                </div>
-
-                <!-- No files -->
-                <div v-else class="text-center py-4 text-gray-500 dark:text-gray-400">
-                    <p>Processing completed, but no result files were generated.</p>
-                </div>
-            </div>
+            <!-- <div v-else-if="isCompleted"></div> -->
         </div>
     </div>
 </template>

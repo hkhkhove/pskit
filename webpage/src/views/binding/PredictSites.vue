@@ -8,7 +8,7 @@ import { renderPdbeMolstar, applySelectionWithRetry, highlightResidues, waitForS
 import { useMolstar, MOLSTAR_COLORS as BASE_COLORS } from "../../composables/useMolstar.js";
 import { useRemoteTask } from "../../composables/useRemoteTask.js";
 
-const { task_id, input_method, ids, files, isLoading, submissionError, showResults, resultFiles, errorItems, is_results_view, is_task_view, submitTask, handleTaskCompleted: handleBaseTaskCompleted, handleTaskFailed, downloadAllAsZip } = useRemoteTask("pred_bs");
+const { task_id, input_method, ids, files, isLoading, submissionError, showResults, resultFiles, errorItems, is_results_view, is_task_view, submitTask, handleTaskCompleted: handleBaseTaskCompleted, handleTaskFailed } = useRemoteTask("pred_nbs");
 
 const { viewerContainer, initViewer, getViewerInstance, revokeViewerObjectUrl, setViewerLastObjectUrl } = useMolstar();
 
@@ -235,7 +235,7 @@ async function handleSubmit() {
 }
 </script>
 <template>
-    <TaskLayout title="Predict Binding Sites" :processing="isLoading" :errorMessage="submissionError" :isTaskView="is_task_view" :isResultsView="is_results_view" :hasResults="showResults" @submit="handleSubmit">
+    <TaskLayout title="Nucleic-acid Binding Site Prediction" :processing="isLoading" :errorMessage="submissionError" :isTaskView="is_task_view" :isResultsView="is_results_view" :showResults="showResults" @submit="handleSubmit">
         <template #input>
             <InputStructure v-model:input_method="input_method" v-model:ids="ids" v-model:files="files" />
         </template>
@@ -274,7 +274,7 @@ async function handleSubmit() {
         </template>
 
         <template #status>
-            <TaskStatus :task-id="task_id" task-name="Binding Site Prediction" @completed="handleTaskCompleted" @failed="handleTaskFailed" />
+            <TaskStatus :task-id="task_id" task-name="Nucleic-acid Binding Site Prediction" @completed="handleTaskCompleted" @failed="handleTaskFailed" />
         </template>
 
         <template #viewer>

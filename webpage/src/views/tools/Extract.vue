@@ -7,13 +7,13 @@ import { extractFragmentInWorker, bytesToDownloadItem, sanitizeKey, stripExtensi
 import { renderPdbeMolstar, applySelectionWithRetry, waitForStructureReady, molstarFormatFromPskitFormat, createBlobUrlFromBytes } from "../../utils/pdbeMolstar.js";
 import { pdbIdFromSource, molstarFormatFromFileName } from "../../utils/structureUtils.js";
 import { useMolstar, MOLSTAR_COLORS } from "../../composables/useMolstar.js";
-import { useBatchTask } from "../../composables/useBatchTask.js";
+import { useWasmTask } from "../../composables/useWasmTask.js";
 
 const route = useRoute();
 const router = useRouter();
 
 const { viewerContainer, initViewer, getViewerInstance, revokeViewerObjectUrl, idStructureCache, getViewerStructureKey, setViewerStructureKey, setViewerLastObjectUrl } = useMolstar();
-const { input_method, ids, files, processing, error_message, results, file_errors, last_run_input_method, is_results_view, has_results, grouped_results, can_download_all, run_button_text, executeBatchTask, downloadAllAsZip } = useBatchTask();
+const { input_method, ids, files, processing, error_message, results, file_errors, last_run_input_method, is_results_view, has_results, grouped_results, can_download_all, run_button_text, executeWasmTask, downloadAllAsZip } = useWasmTask();
 
 const chain_id = ref("");
 const start = ref(null);
@@ -41,7 +41,7 @@ function makeFragmentFilename({ base, format, start, end }) {
 async function runExtractFragment() {
     const chainArg = chain_id.value.trim();
     selected_result.value = null; // 重新提交前，先清空选中状态
-    await executeBatchTask({
+    await executeWasmTask({
         onInputsPrepared: (inputs, lastInputMethod) => {
             idStructureCache.clear();
             if (lastInputMethod === "id") {
@@ -270,7 +270,7 @@ async function triggerDownloadAll() {
 </script>
 
 <template>
-    <TaskLayout title="Extract Fragment" :processing="processing" :runButtonText="run_button_text" :errorMessage="error_message" :fileErrors="file_errors" :isResultsView="is_results_view" :hasResults="has_results" @submit="runExtractFragment">
+    <TaskLayout title="Extract Fragment" :processing="processing" :runButtonText="run_button_text" :errorMessage="error_message" :fileErrors="file_errors" :isResultsView="is_results_view" :showResults="has_results" @submit="runExtractFragment">
         <template #viewer>
             <div class="flex items-center justify-between gap-3">
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Structure</p>

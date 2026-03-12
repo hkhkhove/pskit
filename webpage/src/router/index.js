@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from "vue-router";
 import Home from "../views/Home.vue";
-import BindingAnnotate from "../views/binding/Annotate.vue";
-import BindingPredict from "../views/binding/Predict.vue";
+import BindingAnnotate from "../views/binding/AnnotateSites.vue";
+import BindingPredict from "../views/binding/PredictSites.vue";
+import InteractionPredict from "../views/binding/PredictInteraction.vue";
 import FeaturesStructural from "../views/features/Structural.vue";
 import FeaturesLanguageModel from "../views/features/LanguageModel.vue";
 import ToolsSplit from "../views/tools/Split.vue";
@@ -19,14 +20,19 @@ const router = createRouter({
       component: Home,
     },
     {
-      path: "/binding/annotate",
+      path: "/binding/nbsa",
       name: "BindingAnnotate",
       component: BindingAnnotate,
     },
     {
-      path: "/binding/predict",
+      path: "/binding/nbsp",
       name: "BindingPredict",
       component: BindingPredict,
+    },
+    {
+      path: "/binding/pnip",
+      name: "InteractionPredict",
+      component: InteractionPredict,
     },
     {
       path: "/features/structural",

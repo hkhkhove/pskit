@@ -7,13 +7,13 @@ import TaskLayout from "../../components/TaskLayout.vue";
 import { annotateBindingPairsInWorker, sanitizeKey } from "../../utils/wasmBatch.js";
 import { renderPdbeMolstar, applySelectionWithRetry, highlightResidues, molstarFormatFromPskitFormat, createBlobUrlFromBytes } from "../../utils/pdbeMolstar.js";
 import { useMolstar, MOLSTAR_COLORS } from "../../composables/useMolstar.js";
-import { useBatchTask } from "../../composables/useBatchTask.js";
+import { useWasmTask } from "../../composables/useWasmTask.js";
 
 const route = useRoute();
 const router = useRouter();
 
 const { viewerContainer, initViewer, getViewerInstance, revokeViewerObjectUrl, idStructureCache, getViewerStructureKey, setViewerStructureKey, setViewerLastObjectUrl } = useMolstar();
-const { input_method, ids, files, processing, error_message, results, file_errors, last_run_input_method, is_results_view, has_results, run_button_text, executeBatchTask } = useBatchTask();
+const { input_method, ids, files, processing, error_message, results, file_errors, last_run_input_method, is_results_view, has_results, run_button_text, executeWasmTask } = useWasmTask();
 
 const cutoff = ref("");
 const current_index = ref(0);
@@ -135,7 +135,7 @@ function uniqueZipName(filename, usedSet) {
 async function runAnnotateBindingPairs() {
     current_index.value = 0;
     selected_row_index.value = -1;
-    await executeBatchTask({
+    await executeWasmTask({
         onInputsPrepared: (inputs, lastInputMethod) => {
             idStructureCache.clear();
             if (lastInputMethod === "id") {
@@ -400,7 +400,7 @@ watch(
 </script>
 
 <template>
-    <TaskLayout title="Annotate Binding Sites" :processing="processing" :runButtonText="run_button_text" :errorMessage="error_message" :fileErrors="file_errors" :isResultsView="is_results_view" :hasResults="has_results" @submit="runAnnotateBindingPairs">
+    <TaskLayout title="Nucleic-acid Binding Site Annotation" :processing="processing" :runButtonText="run_button_text" :errorMessage="error_message" :fileErrors="file_errors" :isResultsView="is_results_view" :showResults="has_results" @submit="runAnnotateBindingPairs">
         <template #viewer>
             <div class="flex items-center justify-between gap-3">
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Structure</p>

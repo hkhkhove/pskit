@@ -7,8 +7,9 @@ const menus = [
     {
         name: "Binding",
         items: [
-            { name: "Annotate", path: "/binding/annotate" },
-            { name: "Predict", path: "/binding/predict" },
+            { name: "Annotate Sites", path: "/binding/nbsa" },
+            { name: "Predict Sites", path: "/binding/nbsp" },
+            { name: "Predict Interaction", path: "/binding/pnip" },
         ],
     },
     {

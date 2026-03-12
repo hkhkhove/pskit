@@ -3,8 +3,9 @@ import Card from "../components/Card.vue";
 
 import languageModelImg from "../assets/images/language_model.webp";
 import structuralImg from "../assets/images/structural.webp";
-import predictImg from "../assets/images/predict.webp";
-import annotateImg from "../assets/images/annotate.webp";
+import nbspImg from "../assets/images/nbsp.webp";
+import nbsaImg from "../assets/images/nbsa.webp";
+import pnipImg from "../assets/images/pnip.webp";
 import splitImg from "../assets/images/split.webp";
 import extractImg from "../assets/images/extract.webp";
 import contactMapImg from "../assets/images/contact_map.webp";
@@ -14,14 +15,20 @@ const cards = [
     {
         title: "Annotate Binding Sites",
         description: "Compute protein-nucleic acid binding residue pairs by distance cutoff; export CSV and inspect in 3D.",
-        image: annotateImg,
-        router: "/binding/annotate",
+        image: nbsaImg,
+        router: "/binding/nbsa",
     },
     {
         title: "Predict Binding Sites",
         description: "Predict DNA/RNA-binding residues with scores; visualize predictions in 3D and download CSV.",
-        image: predictImg,
-        router: "/binding/predict",
+        image: nbspImg,
+        router: "/binding/nbsp",
+    },
+    {
+        title: "Protein-Nucleic Interaction Prediction",
+        description: "Predict whether protein and nucleic-acid sequence pairs interact; submit in batch and download scored CSV.",
+        image: pnipImg,
+        router: "/binding/pnip",
     },
     {
         title: "Structural Feature Extraction",
@@ -65,7 +72,8 @@ const cards = [
 <template>
     <main class="mx-auto max-w-7xl px-4 py-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 justify-items-start gap-x-14 gap-y-8">
-            <Card v-for="card in cards" :key="card.title" :title="card.title" :description="card.description" :image="card.image" :router="card.router" />
+            <Card v-for="card in cards" :key="card.title" :title="card.title" :description="card.description"
+                :image="card.image" :router="card.router" />
         </div>
     </main>
 </template>

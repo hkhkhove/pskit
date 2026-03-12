@@ -9,7 +9,7 @@ const props = defineProps({
     fileErrors: { type: Array, default: () => [] },
     isTaskView: { type: Boolean, default: false },
     isResultsView: { type: Boolean, default: false },
-    hasResults: { type: Boolean, default: false },
+    showResults: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["submit"]);
@@ -20,15 +20,15 @@ function onSubmit() {
 </script>
 
 <template>
-    <div class="mx-auto py-8 px-4" :class="isTaskView || (isResultsView && (hasResults || $slots.status)) ? 'max-w-full' : 'max-w-3xl'">
+    <div class="mx-auto py-8 px-4" :class="isTaskView || (isResultsView && (showResults || $slots.status)) ? 'max-w-full' : 'max-w-3xl'">
         <!-- Results View -->
-        <div v-show="isTaskView || (isResultsView && (hasResults || $slots.status))" class="w-full">
-            <div v-if="$slots.status && !hasResults" class="max-w-3xl mx-auto">
+        <div v-show="isTaskView || (isResultsView && (showResults || $slots.status))" class="w-full">
+            <div v-if="$slots.status && !showResults" class="max-w-3xl mx-auto">
                 <slot name="status"></slot>
             </div>
 
             <!-- Full Results Grid -->
-            <div v-else-if="hasResults" :class="$slots.viewer ? 'grid grid-cols-1 gap-6 lg:grid-cols-2' : 'max-w-3xl mx-auto'">
+            <div v-else-if="showResults" :class="$slots.viewer ? 'grid grid-cols-1 gap-6 lg:grid-cols-2' : 'max-w-3xl mx-auto'">
                 <!-- Left: structure viewer / visualizer -->
                 <div v-if="$slots.viewer" class="w-full bg-white rounded-lg shadow-xl p-6 dark:bg-gray-900">
                     <slot name="viewer"></slot>
@@ -56,7 +56,7 @@ function onSubmit() {
         </div>
 
         <!-- Form View -->
-        <form v-show="!(isTaskView || (isResultsView && (hasResults || $slots.status)))" @submit.prevent="onSubmit" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
+        <form v-show="!(isTaskView || (isResultsView && (showResults || $slots.status)))" @submit.prevent="onSubmit" class="w-full bg-white rounded-lg shadow-xl p-8 dark:bg-gray-900">
             <div class="flex w-full justify-start">
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">{{ title }}</p>
             </div>

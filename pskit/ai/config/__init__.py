@@ -21,4 +21,5 @@ path = {
     "esm2_model": os.path.join(base_dir, "model_parameters", "esm2_650M", "esm2_t33_650M_UR50D.pt"),
     "inabe_dna": os.path.join(base_dir, "model_parameters", "INABe_DNA.pth"),
     "inabe_rna": os.path.join(base_dir, "model_parameters", "INABe_RNA.pth"),
+    "pair_model": os.path.join(base_dir, "model_parameters", "pair_pskit.pt"),
 }

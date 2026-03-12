@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 import sys
@@ -8,7 +8,8 @@ import time
 from .config import path
 from .feature import empirical_feats, esm2, saprot
 from .utils import download_pdb
-from .INABe import predict
+from .INABe import main as pred_nbs
+from .PAIR import main as pred_pni
 
 
 @dataclass
@@ -22,14 +23,28 @@ class BaseParams:
 
 
 @dataclass
-class PredBS(BaseParams):
+class PredNBS(BaseParams):
     ligand_type: str = "DNA"
 
     def run(self):
-        return predict(
+        return pred_nbs(
             input_dir=self.input_dir,
             output_dir=self.output_dir,
             target_type=self.ligand_type,
+        )
+
+
+@dataclass
+class PredPNI(BaseParams):
+    sequence_pairs: str = ""
+
+    def run(self):
+        sequence_pairs_list = json.loads(self.sequence_pairs)
+        pairs = [(pair["protein"], pair["nucleic"]) for pair in sequence_pairs_list]
+        return pred_pni(
+            paris=pairs,
+            input_dir=self.input_dir,
+            output_dir=self.output_dir,
         )
 
 
@@ -83,7 +98,8 @@ class LMEmbed(BaseParams):
 
 
 class_map = {
-    "pred_bs": PredBS,
+    "pred_nbs": PredNBS,
+    "pred_pni": PredPNI,
     "emp_feats": EmpFeats,
     "lm_embed": LMEmbed,
 }

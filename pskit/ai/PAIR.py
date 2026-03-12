@@ -1,0 +1,115 @@
+import os
+import traceback
+
+import torch
+import torch.nn as nn
+import esm
+import fm
+
+from .config import path
+
+
+class ContrastiveLearningModel(nn.Module):
+    def __init__(self, model_dim):
+        super(ContrastiveLearningModel, self).__init__()
+        self.nuc_adapter = nn.Sequential(nn.Linear(640, model_dim), nn.ReLU(), nn.LayerNorm(model_dim))  #
+        self.prot_adapter = nn.Sequential(nn.Linear(640, model_dim), nn.ReLU(), nn.LayerNorm(model_dim))  #
+
+    def forward(self, nuc_inputs, prot_inputs):
+
+        nuc_vecs = nuc_inputs
+        prot_vecs = prot_inputs
+
+        nuc_vecs = self.nuc_adapter(nuc_vecs)  # [n, model_dim]
+        prot_vecs = self.prot_adapter(prot_vecs)  # [m, model_dim]
+
+        # [n,1,model_dim] [1,m,model_dim] -> [n,m]
+        output = torch.cosine_similarity(torch.unsqueeze(nuc_vecs, 1), torch.unsqueeze(prot_vecs, 0), dim=2)
+
+        return output
+
+
+def rna_seq_embbding(seqs, device):
+    # Load RNA-FM model
+    EmbbingModel, alphabet = fm.pretrained.rna_fm_t12()
+    batch_converter = alphabet.get_batch_converter()
+    EmbbingModel.to(device)
+    EmbbingModel.eval()  # disables dropout for deterministic results
+
+    tmp = []
+    for i, seq in enumerate(seqs):
+        batch_labels, batch_strs, batch_tokens = batch_converter([(i, seq)])
+        with torch.no_grad():
+            result = EmbbingModel(batch_tokens.to(device), repr_layers=[12])
+            representation = result["representations"][12]
+            tmp.append(representation[:, 1:-1, :].squeeze().mean(0))
+
+    token_embeddings = torch.stack(tmp, dim=0)
+    token_embeddings_cpu = token_embeddings.to("cpu")
+
+    return token_embeddings_cpu
+
+
+def prot_seq_embbding(seqs, device):
+    EmbbingModel, alphabet = esm.pretrained.esm2_t30_150M_UR50D()
+    batch_converter = alphabet.get_batch_converter()
+    EmbbingModel.to(device)
+    EmbbingModel.eval()  # disables dropout for deterministic results
+
+    tmp = []
+    for i, seq in enumerate(seqs):
+        batch_labels, batch_strs, batch_tokens = batch_converter([(i, seq)])
+        with torch.no_grad():
+            result = EmbbingModel(batch_tokens.to(device), repr_layers=[30])
+            representation = result["representations"][30]
+            tmp.append(representation[:, 1:-1, :].squeeze().mean(0))
+
+    token_embeddings = torch.stack(tmp, dim=0)
+    token_embeddings_cpu = token_embeddings.to("cpu")
+
+    return token_embeddings_cpu
+
+
+def main(paris, input_dir, output_dir):
+    error = {}
+
+    model_path = path.get("pair_model")
+    if not os.path.exists(model_path):
+        error["model"] = f"Model file not found: {model_path}"
+        return error
+
+    device = torch.device("cpu")
+
+    model = ContrastiveLearningModel(model_dim=128)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
+
+    prot_seqs = [pair[0] for pair in paris]
+    rna_seqs = [pair[1].upper().replace("T", "U") for pair in paris]
+    try:
+        rna_embbdings = rna_seq_embbding(rna_seqs, device)
+        prot_embbdings = prot_seq_embbding(prot_seqs, device)
+
+        with torch.no_grad():
+            output = model(rna_embbdings, prot_embbdings)
+            output = torch.sigmoid(output)
+
+        with open(os.path.join(output_dir, "predictions.csv"), "w") as f:
+            f.write("Protein,Nucleic Acid,Binding Score\n")
+            for i in range(len(paris)):
+                f.write(f"{prot_seqs[i]},{rna_seqs[i]},{round(output[i][i].item(), 3)}\n")
+    except Exception as e:
+        error["prediction"] = str(e) + "\n" + traceback.format_exc()
+
+    return error
+
+
+if __name__ == "__main__":
+    paris = [
+        (
+            "MEYASDASLDPEAPWPPAPRARACRVLPWALVAGLLLLLLLAAACAVFLACPWAVSGARASPGSAASPRLREGPELSPDDPAGLLDLRQGMFAQLVAQNVLLIDGPLSWYSDPGLAGVSLTGGLSYKEDTKELVVAKAGVYYVFFQLELRRVVAGEGSGSVSLALHLQPLRSAAGAAALALTVDLPPASSEARNSAFGFQGRLLHLSAGQRLGVHLHTEARARHAWQLTQGATVLGLFRVTPEIPAGLPSPRSE",
+            "GGGAGAGAGGAAGAGGGAUGGGCGACCGAACGUGCCCUUCAAAGCCGUUCACUAACCAGUGGCAUAACCCAGAGGUCGAUAGUACUGGUCCCCCC",
+        ),
+        ("QELLCAASLISDRWVLTAAHCLLYPPWDKNFTVNDILVRIGKYARSRYERNMEKISTLEKIIIHPGYNWRENLDRDIALMKLKKPVAFSDYIHPVCLPDKQIVTSLLQAGHKGRVTGWGNLKEMWTVNMNEVQPSVLQMVNLPLVERPICKASTGIRVTDNMFCAGYKPEEGKRGDACEGDSGGPFVMKNPYNNRWYQMGIVSWGEGCDRDGKYGFYTHVFRLKKWIRKMVDRFG", "GCCCGAUCUACUGCAUUACCGAAACGAUUUCCCCACUGU"),
+    ]
+    main(paris, "./", "./")

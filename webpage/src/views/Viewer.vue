@@ -8,7 +8,7 @@ import { useMolstar } from "../composables/useMolstar.js";
 const route = useRoute();
 const router = useRouter();
 
-const { viewerContainer, initViewer, getViewerInstance, revokeViewerObjectUrl } = useMolstar();
+const { viewerContainer, initViewer } = useMolstar();
 
 const input_method = ref("id");
 const id = ref("");

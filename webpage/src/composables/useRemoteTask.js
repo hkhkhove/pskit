@@ -21,7 +21,6 @@ export function useRemoteTask(taskName) {
     const errorItems = ref({});
 
     const has_task_id = computed(() => Boolean(task_id.value));
-    const is_status_view = computed(() => route.query.view === "status" && has_task_id.value);
     const is_results_view = computed(() => route.query.view === "results" && has_task_id.value);
     const is_task_view = computed(() => (route.query.view === "status" || route.query.view === "results") && has_task_id.value);
 
@@ -100,8 +99,7 @@ export function useRemoteTask(taskName) {
                 throw new Error(`[${response.status}]: ${errorText || "Unknown error"}`);
             }
 
-            // Success: switch to the task status view first. The results view is only shown after completion.
-            const q = { ...route.query, view: "status", task_id: task_id.value };
+            const q = { ...route.query, view: "results", task_id: task_id.value };
             await router.push({ query: q });
             return true;
         } catch (error) {
@@ -129,13 +127,12 @@ export function useRemoteTask(taskName) {
         // error usually shown inside TaskStatus component
     }
 
-    // Monitor URL for task_id restoration
     watch(
         () => route.query,
         (query) => {
-            if ((query.view === "status" || query.view === "results") && query.task_id) {
+            if (query.view === "results" && query.task_id) {
                 task_id.value = query.task_id;
-            } else if ((query.view === "status" || query.view === "results") && !query.task_id && !task_id.value) {
+            } else if (query.view === "results" && !query.task_id && !task_id.value) {
                 const q = { ...route.query };
                 delete q.view;
                 router.replace({ query: q });
@@ -146,8 +143,7 @@ export function useRemoteTask(taskName) {
 
     return {
         task_id, input_method, ids, files,
-        isLoading, submissionError, showResults, resultFiles, errorItems,
-        is_status_view, is_results_view, is_task_view,
+        isLoading, submissionError, showResults, resultFiles, errorItems, is_results_view, is_task_view,
         submitTask, handleTaskCompleted, handleTaskFailed, downloadAllAsZip
     };
 }

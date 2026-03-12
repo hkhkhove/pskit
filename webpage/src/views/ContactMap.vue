@@ -4,12 +4,12 @@ import { useRoute, useRouter } from "vue-router";
 import Loading from "../components/Loading.vue";
 import InputStructure from "../components/InputStructure.vue";
 import { dMapInWorker, sanitizeKey } from "../utils/wasmBatch.js";
-import { useBatchTask } from "../composables/useBatchTask.js";
+import { useWasmTask } from "../composables/useWasmTask.js";
 
 const route = useRoute();
 const router = useRouter();
 
-const { input_method, ids, files, processing, error_message, results, file_errors, is_results_view, has_results, run_button_text, executeBatchTask, grouped_results, can_download_all } = useBatchTask();
+const { input_method, ids, files, processing, error_message, results, file_errors, is_results_view, has_results, run_button_text, executeWasmTask } = useWasmTask();
 
 const chain_id = ref("");
 function chain_id_example() {
@@ -82,7 +82,7 @@ async function runDMap() {
     const chainArg = chain_id.value.trim() ? chain_id.value.trim() : undefined;
     current_index.value = 0;
 
-    await executeBatchTask({
+    await executeWasmTask({
         processOne: (input) => dMapInWorker(input.bytes, chainArg, input.format),
         toDownloadItems: (result, input) => {
             const axis = normalizeAxis(result.axis || []);
