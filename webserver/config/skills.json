@@ -1,0 +1,154 @@
+{
+    "skills": [
+        {
+            "id": "pdb_discovery_download",
+            "name": "PDB Discovery And Download",
+            "description": "Find a relevant PDB entry from natural language and download structure file.",
+            "when_to_use": "User asks to find/select structures from keywords or topic first.",
+            "workflow": [
+                "Use search_pdb(query) to find candidate IDs.",
+                "Use fetch_pdb_info(pdb_id) for top candidate validation.",
+                "Use download_pdb_file(pdb_id, format='cif') to persist chosen structure."
+            ],
+            "allowed_tools": [
+                "search_pdb",
+                "fetch_pdb_info",
+                "download_pdb_file"
+            ],
+            "stop_when": "Chosen structure is downloaded and path is reported.",
+            "terminal_tool": "download_pdb_file"
+        },
+        {
+            "id": "structure_precheck",
+            "name": "Structure Precheck",
+            "description": "Inspect entry metadata and split complex/chains for downstream analysis readiness.",
+            "when_to_use": "User asks to inspect composition, chains, or preprocessing steps.",
+            "workflow": [
+                "Use fetch_pdb_info(pdb_id) for metadata.",
+                "Use split_complex or split_pdb_by_chain on downloaded/local structure.",
+                "Summarize resulting files and recommended analysis entry points."
+            ],
+            "allowed_tools": [
+                "fetch_pdb_info",
+                "download_pdb_file",
+                "split_complex",
+                "split_pdb_by_chain"
+            ],
+            "stop_when": "Structure components are split and summarized.",
+            "terminal_tool": "split_pdb_by_chain"
+        },
+        {
+            "id": "binding_pair_annotation",
+            "name": "Protein Nucleic Acid Binding Pair Annotation",
+            "description": "Annotate protein-nucleic-acid contact residue pairs.",
+            "when_to_use": "User asks for binding pair annotation or contact residues on a specific structure.",
+            "workflow": [
+                "Use download_pdb_file for provided PDB ID when needed.",
+                "Use annotate_binding_pairs with pdb_path and cutoff.",
+                "Return key pair statistics and file paths.",
+                "Use read_result_file to summarize key binding pairs and their distances for user interpretation."
+            ],
+            "allowed_tools": [
+                "download_pdb_file",
+                "annotate_binding_pairs",
+                "fetch_pdb_info",
+                "read_result_file"
+            ],
+            "max_calls_per_tool": {
+                "download_pdb_file": 1,
+                "annotate_binding_pairs": 1,
+                "fetch_pdb_info": 1
+            },
+            "stop_when": "Binding pair annotation result is generated.",
+            "terminal_tool": "read_result_file"
+        },
+        {
+            "id": "fragment_extraction",
+            "name": "Chain Fragment Extraction",
+            "description": "Extract specific chain/region for focused analysis.",
+            "when_to_use": "User asks to isolate chain fragments or residue ranges.",
+            "workflow": [
+                "Download structure if only PDB ID is provided.",
+                "Use extract_fragment(pdb_path, chain, start, end).",
+                "Return fragment file path and suggested next analysis."
+            ],
+            "allowed_tools": [
+                "download_pdb_file",
+                "extract_fragment"
+            ],
+            "stop_when": "Target fragment file is produced.",
+            "terminal_tool": "extract_fragment"
+        },
+        {
+            "id": "contact_map_analysis",
+            "name": "Contact Map Analysis",
+            "description": "Compute structural contact map for chain or full structure.",
+            "when_to_use": "User asks for contact maps, residue contact topology, or graph-ready structure maps.",
+            "workflow": [
+                "Download structure if needed.",
+                "Use calculate_contact_map with mode and optional chain.",
+                "Explain output JSON and key interpretation."
+            ],
+            "allowed_tools": [
+                "download_pdb_file",
+                "calculate_contact_map"
+            ],
+            "stop_when": "Contact map file is generated and interpreted.",
+            "terminal_tool": "calculate_contact_map"
+        },
+        {
+            "id": "binding_site_prediction",
+            "name": "Binding Site Prediction",
+            "description": "Predict DNA/RNA binding sites for protein structure.",
+            "when_to_use": "User asks for binding site prediction rather than deterministic contact annotation.",
+            "workflow": [
+                "Use predict_binding_sites(pdb_id_or_path, ligand_type).",
+                "Summarize output CSV and confidence interpretation.",
+                "Report output files for download."
+            ],
+            "allowed_tools": [
+                "predict_binding_sites",
+                "download_pdb_file",
+                "read_result_file"
+            ],
+            "stop_when": "Prediction outputs are produced and summarized.",
+            "terminal_tool": "read_result_file"
+        },
+        {
+            "id": "feature_extraction_pipeline",
+            "name": "Feature Extraction Pipeline",
+            "description": "Extract language-model and empirical features for downstream modeling.",
+            "when_to_use": "User asks for feature extraction, model-ready descriptors, or comparative feature sets.",
+            "workflow": [
+                "Download structure when needed.",
+                "Use extract_language_model_features and/or extract_empirical_features.",
+                "Summarize feature files and expected downstream usage.",
+                "Use read_result_file to interpret key features and their implications for modeling. Do not read numpy files directly, only summary CSV or text outputs."
+            ],
+            "allowed_tools": [
+                "download_pdb_file",
+                "extract_language_model_features",
+                "extract_empirical_features",
+                "read_result_file"
+            ],
+            "stop_when": "Requested feature files are generated.",
+            "terminal_tool": "read_result_file"
+        },
+        {
+            "id": "sequence_interaction_prediction",
+            "name": "Sequence Interaction Prediction",
+            "description": "Predict interaction from protein and nucleic sequences.",
+            "when_to_use": "User provides sequences without structure and asks interaction likelihood/classification.",
+            "workflow": [
+                "Use predict_interaction(protein_sequence, nucleic_sequence).",
+                "Summarize prediction output and caveats.",
+                "Do not run structure tools unless explicitly requested."
+            ],
+            "allowed_tools": [
+                "predict_interaction"
+            ],
+            "stop_when": "Sequence-level prediction is complete.",
+            "terminal_tool": "predict_interaction"
+        }
+    ]
+}

@@ -5,6 +5,7 @@ use axum::{
     response::{Json, Response},
     routing::{get, post},
 };
+use dotenvy::{dotenv, from_path};
 use sqlx::SqlitePool;
 use std::{collections::HashMap, env, path::PathBuf, sync::Arc};
 use tokio::{
@@ -14,10 +15,13 @@ use tokio::{
 };
 use tower_http::services::{ServeDir, ServeFile};
 
+mod agent;
 mod config;
 mod database;
 mod models;
+mod skills;
 mod tasks;
+mod tools;
 
 use config::Config;
 use models::{File, Task, TaskCreateResponse, TaskResponse, TaskResultsResponse, TaskStatus};
@@ -34,7 +38,7 @@ struct AppState {
 async fn root() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "message": "PSKit API Server",
-        "version": "0.1.0"
+        "version": "0.2.0"
     }))
 }
 
@@ -349,10 +353,15 @@ async fn task_dispatcher(
 #[tokio::main]
 async fn main() {
     println!("Usage: pskit-webserver <work_dir> <address> <max_workers>");
+
+    let _ = dotenv();
+
     let home = env::args()
         .nth(1)
         .map(|arg| PathBuf::from(arg))
         .unwrap_or_else(|| PathBuf::from("./"));
+
+    let _ = from_path(home.join("webserver").join(".env"));
 
     let addr = env::args().nth(2).unwrap_or("127.0.0.1:10706".to_string());
 
@@ -411,6 +420,7 @@ async fn main() {
             "/tasks/{task_id}/results/{filename}",
             get(download_result_file),
         )
+        .nest("/agent", agent::agent_routes())
         .layer(DefaultBodyLimit::max(250 * 1024 * 1024)) // 250 MB limit for file uploads
         .with_state(app_state);
 

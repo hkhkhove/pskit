@@ -9,13 +9,20 @@ import ToolsSplit from "../views/tools/Split.vue";
 import ToolsExtract from "../views/tools/Extract.vue";
 import ContactMap from "../views/ContactMap.vue";
 import Viewer from "../views/Viewer.vue";
+import Agent from "../views/Agent.vue";
 import NotFound from "../views/NotFound.vue";
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: "/agent",
+      name: "Agent",
+      component: Agent,
+    },
+    {
       path: "/",
+
       name: "Home",
       component: Home,
     },

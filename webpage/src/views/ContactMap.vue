@@ -639,40 +639,60 @@ watch(
                 <div class="flex items-center justify-between gap-3">
                     <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Results</p>
                     <div class="flex items-center gap-3 flex-wrap justify-end">
-                        <div class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                        <div
+                            class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
                             <span class="whitespace-nowrap">Color min</span>
-                            <input type="range" min="0" max="99" step="1" v-model.number="color_min_percent" class="w-32" :disabled="processing" aria-label="Color min percent" />
-                            <input type="number" min="0" max="99" step="1" v-model.number="color_min_percent" class="w-16 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white" :disabled="processing" aria-label="Color min percent value" />
+                            <input type="range" min="0" max="99" step="1" v-model.number="color_min_percent"
+                                class="w-32" :disabled="processing" aria-label="Color min percent" />
+                            <input type="number" min="0" max="99" step="1" v-model.number="color_min_percent"
+                                class="w-16 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                                :disabled="processing" aria-label="Color min percent value" />
                             <span class="whitespace-nowrap">%</span>
                         </div>
-                        <div class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                        <div
+                            class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
                             <span class="whitespace-nowrap">Color max</span>
-                            <input type="range" min="1" max="100" step="1" v-model.number="color_max_percent" class="w-40" :disabled="processing" aria-label="Color max percent" />
-                            <input type="number" min="1" max="100" step="1" v-model.number="color_max_percent" class="w-16 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white" :disabled="processing" aria-label="Color max percent value" />
+                            <input type="range" min="1" max="100" step="1" v-model.number="color_max_percent"
+                                class="w-40" :disabled="processing" aria-label="Color max percent" />
+                            <input type="number" min="1" max="100" step="1" v-model.number="color_max_percent"
+                                class="w-16 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                                :disabled="processing" aria-label="Color max percent value" />
                             <span class="whitespace-nowrap">%</span>
                         </div>
-                        <button v-if="has_multiple_results" class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_next" @click="nextResult">Next</button>
+                        <button v-if="has_multiple_results"
+                            class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                            :disabled="!can_next" @click="nextResult">Next</button>
                     </div>
                 </div>
                 <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-                <div class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 max-h-screen overflow-y-auto">
+                <div
+                    class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 max-h-screen overflow-y-auto">
                     <div v-if="current_result" class="space-y-3">
                         <div class="flex justify-between">
                             <div>
                                 <div class="text-sm font-semibold text-gray-900 dark:text-gray-200">
                                     {{ current_title }}
                                 </div>
-                                <div class="text-xs text-gray-500 dark:text-gray-300">chain_id: {{ current_result.chain_id || "all" }} · render: {{ current_result.n }}×{{ current_result.n }}</div>
+                                <div class="text-xs text-gray-500 dark:text-gray-300">chain_id: {{
+                                    current_result.chain_id || "all" }} · render: {{ current_result.n }}×{{
+                                        current_result.n }}</div>
                             </div>
                             <div class="flex items-center gap-2">
-                                <button class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_download" @click="downloadCurrent">Download (CSV)</button>
-                                <button class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="!can_download" @click="downloadHeatmapPng">Download Heatmap (PNG)</button>
+                                <button
+                                    class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                                    :disabled="!can_download" @click="downloadCurrent">Download (CSV)</button>
+                                <button
+                                    class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                                    :disabled="!can_download" @click="downloadHeatmapPng">Download Heatmap
+                                    (PNG)</button>
                             </div>
                         </div>
 
-                        <div ref="canvas_wrap_el" class="w-full h-[600px] flex justify-center text-gray-900 dark:text-gray-200">
-                            <canvas ref="canvas_el" class="h-full w-auto max-w-full" style="aspect-ratio: 1 / 1"></canvas>
+                        <div ref="canvas_wrap_el"
+                            class="w-full h-[600px] flex justify-center text-gray-900 dark:text-gray-200">
+                            <canvas ref="canvas_el" class="h-full w-auto max-w-full"
+                                style="aspect-ratio: 1 / 1"></canvas>
                         </div>
                     </div>
                 </div>
@@ -685,7 +705,8 @@ watch(
             </div>
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-            <InputStructure v-model:input_method="input_method" v-model:ids="ids" v-model:files="files" :max-files="200" :max-size="500 * 1024 * 1024" />
+            <InputStructure v-model:input_method="input_method" v-model:ids="ids" v-model:files="files" :max-files="200"
+                :max-size="500 * 1024 * 1024" />
 
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
@@ -695,28 +716,35 @@ watch(
 
             <div class="w-auto">
                 <div>
-                    <label class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-300">Chain ID <span @click="chain_id_example" class="text-xs cursor-pointer hover:text-blue-700 hover:underline font-normal">(e.g., A. Optional, leave empty for all chains)</span></label>
-                    <input type="text" v-model="chain_id" class="w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400" />
+                    <label class="block mb-2 text-sm font-medium text-gray-900 dark:text-gray-300">Chain ID <span
+                            @click="chain_id_example"
+                            class="text-xs cursor-pointer hover:text-blue-700 hover:underline font-normal">(e.g., A.
+                            Optional, leave empty for all chains)</span></label>
+                    <input type="text" v-model="chain_id"
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400" />
                 </div>
             </div>
 
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed" :disabled="processing" :aria-busy="processing">
+            <button type="submit"
+                class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-lg text-center font-medium text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                :disabled="processing" :aria-busy="processing">
                 <Loading v-if="processing" class="h-5 w-5 text-white" />
                 <span>{{ run_button_text }}</span>
             </button>
 
-            <div v-if="error_message" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+            <div v-if="error_message"
+                class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
                 {{ error_message }}
             </div>
 
-            <div v-if="file_errors.length > 0" class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950 dark:text-yellow-200">
+            <div v-if="file_errors.length > 0"
+                class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950 dark:text-yellow-200">
                 <div class="font-medium">Failed to process the following file(s)</div>
                 <ul class="mt-2 space-y-1">
                     <li v-for="e in file_errors" :key="e.source" class="text-xs">
-                        <span class="font-semibold">{{ e.source }}</span
-                        >: {{ e.message }}
+                        <span class="font-semibold">{{ e.source }}</span>: {{ e.message }}
                     </li>
                 </ul>
             </div>
