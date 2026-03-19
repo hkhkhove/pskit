@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import os
 import sys
@@ -72,15 +72,17 @@ class LMEmbed(BaseParams):
         esm2_error = {}
         saprot_error = {}
         all_error = {}
+        pdb_files = [os.path.join(self.input_dir, f) for f in os.listdir(self.input_dir) if f.endswith(".pdb") or f.endswith(".cif")]
+
         if self.model_type in ["esm2", "both"]:
             esm2_error = esm2.run(
-                input_dir=self.input_dir,
+                pdb_files=pdb_files,
                 output_dir=self.output_dir,
                 path=path,
             )
         if self.model_type in ["saprot", "both"]:
             saprot_error = saprot.run(
-                input_dir=self.input_dir,
+                pdb_files=pdb_files,
                 output_dir=self.output_dir,
                 path=path,
             )

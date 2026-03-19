@@ -6,6 +6,20 @@ import traceback
 from ..config import path as mypath
 
 
+def run_dssp_single(pdb_path, output_dir):
+    try:
+        prot_name, ext = os.path.splitext(os.path.basename(pdb_path))
+        dssp_file = os.path.join(output_dir, prot_name + ".dssp")
+        if not os.path.isfile(dssp_file):
+            cmd = [mypath["dssp"], "--output-format", "dssp", pdb_path, dssp_file]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise Exception(f"DSSP failed: {result.stderr}")
+    except Exception as e:
+        return f"{pdb_path}: DSSP failed,{str(e)}\n{traceback.format_exc()}"
+    return "Success"
+
+
 def run_dssp(input_dir, output_dir):
     error = {}
     pdb_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith(".pdb") or f.endswith(".cif")]
@@ -138,6 +152,84 @@ def run_rosetta_score(input_dir, output_dir, do_relax):
     return error
 
 
+def agent_run(pdb_path, output_dir, emp_feats, rosetta_relax):
+    os.makedirs(output_dir, exist_ok=True)
+    res = ""
+
+    if "dssp" in emp_feats:
+        dssp_file = os.path.join(output_dir, os.path.splitext(os.path.basename(pdb_path))[0] + ".dssp")
+        cmd = [mypath["dssp"], "--output-format", "dssp", pdb_path, dssp_file]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            return f"{pdb_path}: DSSP failed, {result.stderr}"
+        res += dssp_file + "; "
+
+    if "rosetta" in emp_feats:
+        relax_exe = None
+        if rosetta_relax:
+            relax_exe = _find_rosetta_exe(
+                [
+                    "relax.linuxgccrelease",
+                    "relax.default.linuxgccrelease",
+                    "relax",
+                ]
+            )
+        score_exe = _find_rosetta_exe(
+            [
+                "score_jd2.linuxgccrelease",
+                "score_jd2.default.linuxgccrelease",
+                "score_jd2",
+            ]
+        )
+
+        structure_to_score = pdb_path
+        if rosetta_relax:
+            relax_cmd = [
+                relax_exe,
+                "-in:file:s",
+                str(structure_to_score),
+                "-nstruct",
+                "1",
+                "-relax:fast",
+                "-score:weights",
+                "ref2015",
+                "-out:path:all",
+                str(output_dir),
+                "-out:suffix",
+                "_relaxed",
+                "-overwrite",
+            ]
+
+            result = subprocess.run(relax_cmd, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                return f"{pdb_path}: Rosetta relax failed: {result.stderr}"
+
+            relaxed_pdb = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(pdb_path))[0]}_relaxed_0001.pdb")
+
+            if not os.path.exists(relaxed_pdb):
+                return f"{pdb_path}: Rosetta relax failed"
+
+            structure_to_score = relaxed_pdb
+
+        scorefile = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(pdb_path))[0]}_score.txt")
+        score_cmd = [
+            score_exe,
+            "-in:file:s",
+            str(structure_to_score),
+            "-score:weights",
+            "ref2015",
+            "-out:file:scorefile",
+            str(scorefile),
+            "-overwrite",
+        ]
+        result = subprocess.run(score_cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            return f"{pdb_path}: Rosetta score failed: {result.stderr}"
+        res += scorefile
+
+    return f"results files: {res}"
+
+
 def run(input_dir, output_dir, emp_feats, rosetta_relax):
     os.makedirs(output_dir, exist_ok=True)
 
@@ -161,7 +253,18 @@ def run(input_dir, output_dir, emp_feats, rosetta_relax):
 
 
 if __name__ == "__main__":
-    input_dir = "/home/zh/test/input"
-    output_dir = "/home/zh/test/output"
-    emp_feats = ["dssp", "rosetta"]  # Specify which empirical features to compute
-    run(input_dir, output_dir, emp_feats, rosetta_relax=False)
+    # for agent_run
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run empirical features extraction")
+    parser.add_argument("--pdb_file", type=str, required=True, help="Path to input PDB file")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save output")
+    parser.add_argument("--emp_feats", type=str, default="dssp", help="Comma-separated features, including dssp and rosetta, e.g., 'dssp,rosetta'. Default: dssp")
+    parser.add_argument("--rosetta_relax", type=str, default="false", choices=["true", "false"], help="Whether to perform Rosetta relax. Default: false")
+    args = parser.parse_args()
+
+    emp_feats_list = [f.strip().lower() for f in args.emp_feats.split(",") if f.strip()]
+    rosetta_relax_bool = args.rosetta_relax.lower() == "true"
+
+    result = agent_run(args.pdb_file, args.output_dir, emp_feats_list, rosetta_relax_bool)
+    print(result)

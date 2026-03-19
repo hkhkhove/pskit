@@ -1,0 +1,14 @@
+chat.model = "gemini-3-flash-preview"
+skill_selection.model = "gemini-3-flash-preview"
+summary.model = "gemini-3.1-flash-lite-preview"
+
+
+chat.api = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+skill_selection.api = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+summary.api = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+max_agent_steps = 30
+max_tool_calls = 60
+recent_user_turns_window = 12
+summary_every_user_turns = 8
+max_tool_result_chars = 4000

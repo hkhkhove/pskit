@@ -1,31 +1,60 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
-    http::{StatusCode, header::CONTENT_TYPE},
-    response::{
-        Response,
-        sse::{Event, Sse},
-    },
-    routing::{get, post},
+    extract::State,
+    response::sse::{Event, Sse},
+    routing::{delete, get, post},
 };
 use futures::Stream;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::convert::Infallible;
-use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::TryAcquireError;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::skills::{
+
+mod context;
+mod skills;
+mod store;
+mod summarizer;
+mod tools;
+mod utils;
+
+use self::skills::{
     Skill, allowed_tool_set, default_skill, load_skills, render_skill_prompt, select_skill_with_llm,
 };
-use crate::tools::{execute_tool, get_tools};
+use self::tools::{execute_tool, get_tools};
 
-const MAX_AGENT_STEPS: usize = 10;
-const MAX_TOOL_CALLS: usize = 12;
-const MAX_SAME_TOOL_SIGNATURE: usize = 1;
+use self::context::{
+    SUMMARY_MARKER, build_context_history, count_user_turns, get_content, get_role,
+};
+use self::store::{
+    build_session_dir, delete_session, download_session_tool_file, get_session_history,
+    history_file, list_session_files, read_history, write_history,
+};
+use self::summarizer::{generate_history_summary, generate_session_title};
+use self::utils::{parse_tool_args, truncate_text};
+
+#[derive(Debug, Deserialize)]
+struct ModelConfig {
+    model: String,
+    api: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentConfig {
+    chat: ModelConfig,
+    skill_selection: ModelConfig,
+    summary: ModelConfig,
+
+    max_agent_steps: usize,
+    max_tool_calls: usize,
+    recent_user_turns_window: usize,
+    summary_every_user_turns: usize,
+    max_tool_result_chars: usize,
+}
 
 #[derive(Default, Clone)]
 struct ToolCallAcc {
@@ -35,180 +64,40 @@ struct ToolCallAcc {
     extra_content: Option<serde_json::Value>,
 }
 
-fn merge_stream_field(current: &mut String, incoming: &str) {
-    if incoming.is_empty() {
-        return;
-    }
-
-    if !current.is_empty() && incoming.starts_with(current.as_str()) {
-        *current = incoming.to_string();
-        return;
-    }
-
-    if incoming.starts_with('{') {
-        *current = incoming.to_string();
-        return;
-    }
-
-    current.push_str(incoming);
+#[derive(Deserialize)]
+pub struct ChatRequest {
+    pub message: String,
+    pub session_id: Option<String>,
 }
 
-fn find_or_create_tool_call(
-    calls: &mut Vec<ToolCallAcc>,
-    id_to_index: &mut HashMap<String, usize>,
-    index_hint: Option<usize>,
-    id_hint: Option<&str>,
-    position_hint: usize,
-) -> usize {
-    if let Some(id) = id_hint {
-        if let Some(idx) = id_to_index.get(id).copied() {
-            return idx;
-        }
-
-        // If this call has a new ID, always allocate a new slot unless explicit index is provided.
-        if index_hint.is_none() {
-            calls.push(ToolCallAcc::default());
-            let idx = calls.len() - 1;
-            id_to_index.insert(id.to_string(), idx);
-            return idx;
-        }
-    }
-
-    if let Some(idx) = index_hint {
-        while calls.len() <= idx {
-            calls.push(ToolCallAcc::default());
-        }
-        return idx;
-    }
-
-    if position_hint < calls.len() {
-        return position_hint;
-    }
-
-    calls.push(ToolCallAcc::default());
-    calls.len() - 1
-}
-
-fn parse_tool_args(args_raw: &str) -> Result<serde_json::Value, String> {
-    // 1) Happy path.
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(args_raw) {
-        return Ok(v);
-    }
-
-    // 2) Sometimes arguments are wrapped in a quoted JSON string.
-    if let Ok(unwrapped) = serde_json::from_str::<String>(args_raw) {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&unwrapped) {
-            return Ok(v);
-        }
-    }
-
-    // 3) Try extracting the largest {...} block.
-    if let (Some(start), Some(end)) = (args_raw.find('{'), args_raw.rfind('}')) {
-        if start < end {
-            let candidate = &args_raw[start..=end];
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(candidate) {
-                return Ok(v);
-            }
-        }
-    }
-
-    Err(format!(
-        "Invalid tool arguments (first 300 chars): {}",
-        args_raw.chars().take(300).collect::<String>()
-    ))
-}
-
-fn normalize_tool_signature(name: &str, args_raw: &str) -> String {
-    let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-        .unwrap_or_else(|_| serde_json::json!({"raw": args_raw}));
-
-    match name {
-        "download_pdb_file" => {
-            let pdb_id = parsed
-                .get("pdb_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            let format = parsed
-                .get("format")
-                .and_then(|v| v.as_str())
-                .unwrap_or("cif")
-                .to_ascii_lowercase();
-            format!("{}::pdb_id={}::format={}", name, pdb_id, format)
-        }
-        "annotate_binding_pairs" => {
-            let pdb_path = parsed
-                .get("pdb_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            let canonical_pdb = pdb_path
-                .strip_suffix(".cif")
-                .or_else(|| pdb_path.strip_suffix(".pdb"))
-                .unwrap_or(&pdb_path)
-                .to_string();
-            let cutoff = parsed.get("cutoff").and_then(|v| v.as_f64()).unwrap_or(3.5);
-            format!("{}::pdb={}::cutoff={:.3}", name, canonical_pdb, cutoff)
-        }
-        _ => format!("{}::{}", name, args_raw),
-    }
-}
-
-fn sanitize_display_path(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
-    if !normalized.starts_with('/') {
-        return path.to_string();
-    }
-
-    let marker = "/tasks/agent_sessions/";
-    if let Some(idx) = normalized.find(marker) {
-        let tail = &normalized[idx + marker.len()..];
-        let parts = tail.split('/').collect::<Vec<_>>();
-        if parts.len() >= 3 {
-            return parts[2..].join("/");
-        }
-    }
-
-    let parts = normalized
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>();
-    if parts.len() >= 2 {
-        return format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]);
-    }
-
-    normalized
-}
-
-fn sanitize_display_value(v: &mut serde_json::Value) {
-    match v {
-        serde_json::Value::String(s) => {
-            if s.starts_with('/') {
-                *s = sanitize_display_path(s);
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                sanitize_display_value(item);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for value in map.values_mut() {
-                sanitize_display_value(value);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn sanitize_tool_args_for_display(args_raw: &str) -> String {
-    match serde_json::from_str::<serde_json::Value>(args_raw) {
-        Ok(mut v) => {
-            sanitize_display_value(&mut v);
-            serde_json::to_string(&v).unwrap_or_else(|_| args_raw.to_string())
-        }
-        Err(_) => args_raw.to_string(),
-    }
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentEvent {
+    SessionTitle {
+        session_id: String,
+        title: String,
+    },
+    Text {
+        content: String,
+    },
+    ToolCall {
+        tool_call_id: String,
+        name: String,
+        args: String,
+    },
+    ToolResult {
+        tool_call_id: String,
+        content: String,
+    },
+    ToolStatus {
+        tool_call_id: String,
+        status: String,
+        message: Option<String>,
+    },
+    Error {
+        message: String,
+    },
+    Done,
 }
 
 fn debug_enabled() -> bool {
@@ -224,182 +113,55 @@ fn debug_log(msg: &str) {
     }
 }
 
-#[derive(Deserialize)]
-pub struct ChatRequest {
-    pub message: String,
-    pub session_id: Option<String>,
+fn needs_cpu_semaphore(tool_name: &str) -> bool {
+    matches!(tool_name, "predict_binding_sites" | "predict_interaction")
 }
 
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AgentEvent {
-    Text { content: String },
-    ToolCall { name: String, args: String },
-    ToolResult { content: String },
-    Error { message: String },
-    Done,
+fn load_agent_config() -> anyhow::Result<AgentConfig> {
+    let config_path = crate::config::Config::home()
+        .join("agent_config")
+        .join("config.toml");
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read agent config: {}", e))?;
+    let config: AgentConfig = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse agent config: {}", e))?;
+    Ok(config)
 }
 
-#[derive(Serialize)]
-struct AgentSessionFile {
-    path: String,
-    size: u64,
-    download_url: String,
-}
-
-#[derive(Serialize)]
-struct AgentSessionFilesResponse {
-    session_id: String,
-    total_files: usize,
-    files: Vec<AgentSessionFile>,
+fn load_system_prompt() -> anyhow::Result<String> {
+    let config_path = crate::config::Config::home()
+        .join("agent_config")
+        .join("system_prompt.txt");
+    let system_prompt = std::fs::read_to_string(&config_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read system prompt: {}", e))?;
+    Ok(system_prompt)
 }
 
 pub fn agent_routes() -> Router<AppState> {
     Router::new()
         .route("/", post(chat_handler))
+        .route("/sessions/{session_id}", delete(delete_session))
         .route("/sessions/{session_id}/files", get(list_session_files))
+        .route("/sessions/{session_id}/history", get(get_session_history))
         .route(
-            "/sessions/{session_id}/download/{*relative_path}",
-            get(download_session_file),
+            "/sessions/{session_id}/{tool_call_id}/{filename}",
+            get(download_session_tool_file),
         )
-}
-
-fn content_type_for_path(path: &std::path::Path) -> &'static str {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("json") => "application/json",
-        Some("csv") => "text/csv",
-        Some("tsv") => "text/tab-separated-values",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("pdf") => "application/pdf",
-        Some("npy") => "application/octet-stream",
-        Some("dssp") => "text/plain; charset=utf-8",
-        Some("log") => "text/plain; charset=utf-8",
-        Some("pdb") => "chemical/x-pdb",
-        Some("cif") => "chemical/x-cif",
-        _ => "application/octet-stream",
-    }
-}
-
-async fn collect_session_files(
-    session_dir: &std::path::Path,
-) -> Result<Vec<(PathBuf, u64)>, String> {
-    let mut files = Vec::new();
-    let mut stack = vec![session_dir.to_path_buf()];
-
-    while let Some(dir) = stack.pop() {
-        let mut entries = tokio::fs::read_dir(&dir)
-            .await
-            .map_err(|e| format!("Failed to read dir {}: {}", dir.display(), e))?;
-
-        while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
-            let path = entry.path();
-            let metadata = entry.metadata().await.map_err(|e| e.to_string())?;
-            if metadata.is_dir() {
-                stack.push(path);
-            } else if metadata.is_file() {
-                files.push((path, metadata.len()));
-            }
-        }
-    }
-
-    Ok(files)
-}
-
-async fn list_session_files(
-    Path(session_id): Path<String>,
-) -> Result<Json<AgentSessionFilesResponse>, (StatusCode, String)> {
-    let home = crate::config::Config::home();
-    let session_dir = home.join("tasks").join("agent_sessions").join(&session_id);
-
-    if !session_dir.exists() {
-        return Ok(Json(AgentSessionFilesResponse {
-            session_id,
-            total_files: 0,
-            files: Vec::new(),
-        }));
-    }
-
-    let mut files = collect_session_files(&session_dir)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .into_iter()
-        .filter_map(|(path, size)| {
-            let rel = path.strip_prefix(&session_dir).ok()?;
-            let rel_str = rel.to_string_lossy().replace('\\', "/");
-            Some(AgentSessionFile {
-                path: rel_str.clone(),
-                size,
-                download_url: format!("/api/agent/sessions/{}/download/{}", session_id, rel_str),
-            })
-        })
-        .collect::<Vec<_>>();
-
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-
-    Ok(Json(AgentSessionFilesResponse {
-        session_id,
-        total_files: files.len(),
-        files,
-    }))
-}
-
-async fn download_session_file(
-    Path((session_id, relative_path)): Path<(String, String)>,
-) -> Result<Response, (StatusCode, String)> {
-    let home = crate::config::Config::home();
-    let session_dir = home.join("tasks").join("agent_sessions").join(&session_id);
-    let file_path = session_dir.join(&relative_path);
-
-    if !file_path.exists() {
-        return Err((StatusCode::NOT_FOUND, "File not found".to_string()));
-    }
-
-    let session_dir_canonical = tokio::fs::canonicalize(&session_dir)
-        .await
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid session path".to_string()))?;
-    let file_path_canonical = tokio::fs::canonicalize(&file_path)
-        .await
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid file path".to_string()))?;
-
-    if !file_path_canonical.starts_with(&session_dir_canonical) {
-        return Err((StatusCode::BAD_REQUEST, "Invalid file path".to_string()));
-    }
-
-    let file_content = tokio::fs::read(&file_path_canonical).await.map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to read file".to_string(),
-        )
-    })?;
-
-    let filename = file_path_canonical
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("download.bin")
-        .to_string();
-
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(CONTENT_TYPE, content_type_for_path(&file_path_canonical))
-        .header(
-            "Content-Disposition",
-            format!("attachment; filename=\"{}\"", filename),
-        )
-        .body(file_content.into())
-        .unwrap())
 }
 
 async fn chat_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (tx, rx) = mpsc::unbounded_channel();
     let session_id = req.session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    //只是引用计数加一，指向的还是同一信号量
+    let cpu_task_semaphore = state.cpu_task_semaphore.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = run_agent_loop(req.message, session_id, tx.clone()).await {
+        if let Err(e) =
+            run_agent_loop(req.message, session_id, cpu_task_semaphore, tx.clone()).await
+        {
             let _ = tx.send(Ok(Event::default()
                 .json_data(AgentEvent::Error {
                     message: e.to_string(),
@@ -416,6 +178,7 @@ async fn chat_handler(
 async fn run_agent_loop(
     user_message: String,
     session_id: String,
+    cpu_task_semaphore: Arc<tokio::sync::Semaphore>,
     tx: mpsc::UnboundedSender<Result<Event, Infallible>>,
 ) -> anyhow::Result<()> {
     let api_key = std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| "".to_string());
@@ -425,15 +188,22 @@ async fn run_agent_loop(
         ));
     }
 
+    let agent_config = load_agent_config()?;
+
     let client = reqwest::Client::new();
-    let api_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
     let skills = load_skills()?;
-    let selected_skill_id =
-        select_skill_with_llm(&client, api_url, &api_key, &user_message, &skills)
-            .await
-            .ok()
-            .flatten();
+    let selected_skill_id = select_skill_with_llm(
+        &client,
+        &agent_config.skill_selection.model,
+        &agent_config.skill_selection.api,
+        &api_key,
+        &user_message,
+        &skills,
+    )
+    .await
+    .ok()
+    .flatten();
     let selected_skill: Skill = if let Some(skill_id) = selected_skill_id {
         skills
             .iter()
@@ -442,35 +212,70 @@ async fn run_agent_loop(
             .or_else(|| default_skill(&skills))
             .ok_or_else(|| anyhow::anyhow!("No skills configured"))?
     } else {
+        debug_log("LLM did not select a skill, using default.");
         default_skill(&skills).ok_or_else(|| anyhow::anyhow!("No skills configured"))?
     };
     let allowed_tools = allowed_tool_set(&selected_skill);
 
-    // Create session dir
     let home = crate::config::Config::home();
-    let session_dir = home.join("tasks").join("agent_sessions").join(&session_id);
+    let session_dir = build_session_dir(&home, &session_id);
     tokio::fs::create_dir_all(&session_dir).await?;
+
+    let history_file = history_file(&session_dir);
+
+    let system_prompt = load_system_prompt()?;
 
     let mut messages = vec![
         serde_json::json!({
             "role": "system",
-            "content": "You are an expert structural bioinformatics agent for PSKit. You have tools to search PDB, fetch info, split complexes, extract features, and predict interactions/binding sites. Use tools to answer the user's queries. You MUST use the tools provided. Before analyzing structure, always use tools to fetch and process the PDB first. Keep tool arguments simple and exactly as defined."
+            "content": system_prompt,
         }),
         serde_json::json!({
             "role": "system",
             "content": render_skill_prompt(&selected_skill),
         }),
-        serde_json::json!({
-            "role": "user",
-            "content": user_message,
-        }),
     ];
 
-    let tools = serde_json::to_value(get_tools())?;
+    let mut has_prior_history = false;
+    let mut stored_history: Vec<serde_json::Value> = Vec::new();
+    if let Ok(mut history) = read_history(&history_file).await {
+        has_prior_history = !history.is_empty();
+        stored_history.append(&mut history);
+    }
+
+    let mut context_history =
+        build_context_history(&stored_history, agent_config.recent_user_turns_window);
+    messages.append(&mut context_history);
+
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": user_message,
+    }));
+    //新对话，没有历史记录，生成标题
+    if !has_prior_history {
+        if let Some(title) = generate_session_title(
+            &client,
+            &agent_config.summary.model,
+            &agent_config.summary.api,
+            &api_key,
+            &user_message,
+        )
+        .await
+        {
+            let _ = tx.send(Ok(Event::default()
+                .json_data(AgentEvent::SessionTitle {
+                    session_id: session_id.clone(),
+                    title,
+                })
+                .unwrap()));
+        } else {
+            debug_log("Failed to generate session title.");
+        }
+    }
+
+    let tools = get_tools()?;
+    //只允许使用选中skill中允许的工具
     let filtered_tools: Vec<serde_json::Value> = tools
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
         .into_iter()
         .filter(|tool| {
             let name = tool
@@ -483,17 +288,16 @@ async fn run_agent_loop(
         .collect();
     let mut agent_steps = 0usize;
     let mut total_tool_calls = 0usize;
-    let mut tool_signature_counts: HashMap<String, usize> = HashMap::new();
-    let mut tool_name_counts: HashMap<String, usize> = HashMap::new();
-    let mut tools_enabled = true;
+    let tools_enabled = true;
 
     loop {
         agent_steps += 1;
-        if agent_steps > MAX_AGENT_STEPS {
+        if agent_steps > agent_config.max_agent_steps {
             let msg = format!(
                 "Stopped after {} planning rounds to prevent infinite loop.",
-                MAX_AGENT_STEPS
+                agent_config.max_agent_steps
             );
+
             let _ = tx.send(Ok(Event::default()
                 .json_data(AgentEvent::Error {
                     message: msg.clone(),
@@ -501,9 +305,9 @@ async fn run_agent_loop(
                 .unwrap()));
             break;
         }
-
+        //启用Stream
         let mut request_body = serde_json::json!({
-            "model": "gemini-3-flash-preview",
+            "model": &agent_config.chat.model,
             "messages": messages,
             "stream": true,
         });
@@ -523,17 +327,19 @@ async fn run_agent_loop(
                 .map(|v| v.len())
                 .unwrap_or(0);
             debug_log(&format!(
-                "Sending request: model=gemini-3-flash-preview, stream=true, skill={}, messages={}, tools={}, tools_enabled={}",
-                selected_skill.id, msg_count, tool_count, tools_enabled
+                "Sending request: model={}, stream=true, skill={}, messages={}, tools={}, tools_enabled={}",
+                agent_config.chat.model, selected_skill.id, msg_count, tool_count, tools_enabled
             ));
         }
-
+        //LLM响应头
         let response = client
-            .post(api_url)
+            .post(&agent_config.chat.api)
             .bearer_auth(&api_key)
             .json(&request_body)
             .send()
             .await?;
+
+        debug_log(&format!("Request body: {}", request_body));
 
         let status = response.status();
         if !status.is_success() {
@@ -543,16 +349,19 @@ async fn run_agent_loop(
 
         let mut assistant_content = String::new();
         let mut calls: Vec<ToolCallAcc> = Vec::new();
-        let mut id_to_index: HashMap<String, usize> = HashMap::new();
 
         let mut buffer = String::new();
-        let mut stream_done = false;
         let mut response = response;
+        //流式传输LLM生成内容
         while let Some(bytes) = response.chunk().await? {
+            //bytes是不断到达的LLM输出内容，可能包含多条SSE事件，或者部分事件
             buffer.push_str(&String::from_utf8_lossy(&bytes));
 
+            //SSE规定每个事件以双换行分割
+            //一个事件可能有一行或多行以data:开头的内容？
             while let Some(event_end) = buffer.find("\n\n") {
                 let event_text = buffer[..event_end].to_string();
+                //移除已处理文本
                 buffer.drain(..event_end + 2);
 
                 let mut data_lines = Vec::new();
@@ -568,12 +377,8 @@ async fn run_agent_loop(
                 }
 
                 let data_payload = data_lines.join("\n");
-                if data_payload == "[DONE]" {
-                    debug_log("Received [DONE] from Gemini stream");
-                    stream_done = true;
-                    break;
-                }
 
+                //把一个事件中多行data:内容合并成一个完整的JSON块，进行解析
                 let chunk: serde_json::Value = match serde_json::from_str(&data_payload) {
                     Ok(v) => v,
                     Err(err) => {
@@ -586,81 +391,46 @@ async fn run_agent_loop(
                     }
                 };
 
-                if debug_enabled() {
-                    let choice_count = chunk
-                        .get("choices")
-                        .and_then(|v| v.as_array())
-                        .map(|v| v.len())
-                        .unwrap_or(0);
-                    debug_log(&format!("Chunk parsed: choices={}", choice_count));
-                }
-
+                //LLM可能会生成多个不同的回答（choices）
                 if let Some(choices) = chunk.get("choices").and_then(|v| v.as_array()) {
-                    for choice in choices {
-                        let delta = choice.get("delta").cloned().unwrap_or_default();
+                    //流式传输中，delta(增量)替代message，需要不断合并增量内容构建完整message
+                    let choice = &choices[0];
+                    let delta = choice.get("delta").cloned().unwrap_or_default();
 
-                        if let Some(content_part) = delta.get("content").and_then(|v| v.as_str()) {
-                            assistant_content.push_str(content_part);
-                            let _ = tx.send(Ok(Event::default()
-                                .json_data(AgentEvent::Text {
-                                    content: content_part.to_string(),
-                                })
-                                .unwrap()));
-                        }
+                    if let Some(content_part) = delta.get("content").and_then(|v| v.as_str()) {
+                        assistant_content.push_str(content_part);
+                        let _ = tx.send(Ok(Event::default()
+                            .json_data(AgentEvent::Text {
+                                content: content_part.to_string(),
+                            })
+                            .unwrap()));
+                    }
+                    if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                        for tc in tool_calls.iter() {
+                            calls.push(ToolCallAcc::default());
+                            let idx = calls.len() - 1;
 
-                        if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array())
-                        {
-                            for (pos, tc) in tool_calls.iter().enumerate() {
-                                let index_hint =
-                                    tc.get("index").and_then(|v| v.as_u64()).map(|n| n as usize);
-                                let id_hint = tc.get("id").and_then(|v| v.as_str());
-                                let idx = find_or_create_tool_call(
-                                    &mut calls,
-                                    &mut id_to_index,
-                                    index_hint,
-                                    id_hint,
-                                    pos,
-                                );
+                            if let Some(id) = tc.get("id") {
+                                calls[idx].id = id.as_str().unwrap_or_default().to_string();
+                            }
 
-                                if let Some(id) = id_hint {
-                                    calls[idx].id = id.to_string();
-                                    id_to_index.insert(id.to_string(), idx);
+                            if let Some(func) = tc.get("function") {
+                                if let Some(name_part) = func.get("name") {
+                                    calls[idx].name =
+                                        name_part.as_str().unwrap_or_default().to_string();
                                 }
-
-                                if let Some(func) = tc.get("function") {
-                                    if let Some(name_part) =
-                                        func.get("name").and_then(|v| v.as_str())
-                                    {
-                                        merge_stream_field(&mut calls[idx].name, name_part);
-                                    }
-                                    if let Some(args_part) =
-                                        func.get("arguments").and_then(|v| v.as_str())
-                                    {
-                                        merge_stream_field(&mut calls[idx].arguments, args_part);
-                                    }
+                                if let Some(args_part) = func.get("arguments") {
+                                    calls[idx].arguments =
+                                        args_part.as_str().unwrap_or_default().to_string();
                                 }
+                            }
 
-                                if let Some(extra) = tc.get("extra_content") {
-                                    calls[idx].extra_content = Some(extra.clone());
-                                    if debug_enabled() {
-                                        let has_sig = extra
-                                            .get("google")
-                                            .and_then(|v| v.get("thought_signature"))
-                                            .is_some();
-                                        debug_log(&format!(
-                                            "Tool-call chunk idx={} got extra_content, thought_signature_present={}",
-                                            idx, has_sig
-                                        ));
-                                    }
-                                }
+                            if let Some(extra) = tc.get("extra_content") {
+                                calls[idx].extra_content = Some(extra.clone());
                             }
                         }
                     }
                 }
-            }
-
-            if stream_done {
-                break;
             }
         }
 
@@ -686,22 +456,7 @@ async fn run_agent_loop(
             if let Some(extra) = &call.extra_content {
                 tc["extra_content"] = extra.clone();
             }
-            if debug_enabled() {
-                let has_sig = call
-                    .extra_content
-                    .as_ref()
-                    .and_then(|v| v.get("google"))
-                    .and_then(|v| v.get("thought_signature"))
-                    .is_some();
-                debug_log(&format!(
-                    "Rebuilt tool_call {}: id={}, name={}, args_len={}, thought_signature_present={}",
-                    i,
-                    id,
-                    call.name,
-                    call.arguments.len(),
-                    has_sig
-                ));
-            }
+
             tool_calls.push(tc);
         }
 
@@ -709,14 +464,11 @@ async fn run_agent_loop(
         if !assistant_content.is_empty() {
             message["content"] = serde_json::Value::String(assistant_content);
         }
-        if !tool_calls.is_empty() {
-            message["tool_calls"] = serde_json::Value::Array(tool_calls.clone());
-        }
 
         if !tool_calls.is_empty() {
+            message["tool_calls"] = serde_json::Value::Array(tool_calls.clone());
+
             if !tools_enabled {
-                // Some models may still emit tool_calls even when no tools are supplied.
-                // Treat this as a finalization step and ask model to answer without tools.
                 messages.push(serde_json::json!({
                     "role": "assistant",
                     "content": "Tool calls are disabled now. Provide final answer directly without calling tools."
@@ -724,24 +476,13 @@ async fn run_agent_loop(
                 continue;
             }
 
-            // IMPORTANT: preserve full assistant message exactly, including
-            // tool_calls.extra_content.google.thought_signature.
-            debug_log(&format!(
-                "Assistant requested {} tool call(s). Preserving full assistant message for replay.",
-                tool_calls.len()
-            ));
             messages.push(message.clone());
 
-            let mut terminal_reached_in_batch = false;
             for tool_call in tool_calls {
-                if terminal_reached_in_batch {
-                    break;
-                }
-
-                if total_tool_calls >= MAX_TOOL_CALLS {
+                if total_tool_calls >= agent_config.max_tool_calls {
                     let msg = format!(
                         "Stopped after {} tool calls to prevent runaway execution.",
-                        MAX_TOOL_CALLS
+                        agent_config.max_tool_calls
                     );
                     let _ = tx.send(Ok(Event::default()
                         .json_data(AgentEvent::Error {
@@ -769,28 +510,6 @@ async fn run_agent_loop(
                     .unwrap_or("{}")
                     .to_string();
 
-                if let Some(max_calls) = selected_skill.max_calls_per_tool.get(&name) {
-                    let used = tool_name_counts.get(&name).copied().unwrap_or(0);
-                    if used >= *max_calls {
-                        let skip_msg = format!(
-                            "Tool '{}' skipped: reached skill limit {}/{} for skill '{}'.",
-                            name, used, max_calls, selected_skill.id
-                        );
-                        let _ = tx.send(Ok(Event::default()
-                            .json_data(AgentEvent::ToolResult {
-                                content: skip_msg.clone(),
-                            })
-                            .unwrap()));
-                        messages.push(serde_json::json!({
-                            "role": "tool",
-                            "name": name,
-                            "tool_call_id": tool_id,
-                            "content": skip_msg,
-                        }));
-                        continue;
-                    }
-                }
-
                 if !allowed_tools.contains(name.as_str()) {
                     let skip_msg = format!(
                         "Tool '{}' is not allowed for active skill '{}'",
@@ -798,6 +517,7 @@ async fn run_agent_loop(
                     );
                     let _ = tx.send(Ok(Event::default()
                         .json_data(AgentEvent::ToolResult {
+                            tool_call_id: tool_id.clone(),
                             content: skip_msg.clone(),
                         })
                         .unwrap()));
@@ -811,39 +531,12 @@ async fn run_agent_loop(
                 }
 
                 total_tool_calls += 1;
-                tool_name_counts
-                    .entry(name.clone())
-                    .and_modify(|n| *n += 1)
-                    .or_insert(1);
-
-                let signature = normalize_tool_signature(&name, &args_str);
-                let seen = tool_signature_counts
-                    .entry(signature.clone())
-                    .and_modify(|n| *n += 1)
-                    .or_insert(1);
-                if *seen > MAX_SAME_TOOL_SIGNATURE {
-                    let skip_msg = format!(
-                        "Skipped repeated tool call {} with same args to avoid loop.",
-                        name
-                    );
-                    let _ = tx.send(Ok(Event::default()
-                        .json_data(AgentEvent::ToolResult {
-                            content: skip_msg.clone(),
-                        })
-                        .unwrap()));
-                    messages.push(serde_json::json!({
-                        "role": "tool",
-                        "name": name,
-                        "tool_call_id": tool_id,
-                        "content": skip_msg,
-                    }));
-                    continue;
-                }
 
                 let _ = tx.send(Ok(Event::default()
                     .json_data(AgentEvent::ToolCall {
+                        tool_call_id: tool_id.clone(),
                         name: name.clone(),
-                        args: sanitize_tool_args_for_display(&args_str),
+                        args: args_str.clone(),
                     })
                     .unwrap()));
 
@@ -860,6 +553,7 @@ async fn run_agent_loop(
                         let err_msg = format!("Tool arguments parse failed: {}", err);
                         let _ = tx.send(Ok(Event::default()
                             .json_data(AgentEvent::ToolResult {
+                                tool_call_id: tool_id.clone(),
                                 content: err_msg.clone(),
                             })
                             .unwrap()));
@@ -872,36 +566,104 @@ async fn run_agent_loop(
                         continue;
                     }
                 };
+                //session目录下用每个工具的tool_call_id创建子目录存放结果文件
+                let tool_call_dir = session_dir.join(&tool_id);
+                if let Err(e) = tokio::fs::create_dir_all(&tool_call_dir).await {
+                    let err_msg = format!("Failed to create tool_call dir: {}", e);
+                    let _ = tx.send(Ok(Event::default()
+                        .json_data(AgentEvent::ToolResult {
+                            tool_call_id: tool_id.clone(),
+                            content: err_msg.clone(),
+                        })
+                        .unwrap()));
+                    messages.push(serde_json::json!({
+                        "role": "tool",
+                        "name": name,
+                        "tool_call_id": tool_id,
+                        "content": err_msg,
+                    }));
+                    continue;
+                }
 
-                let result = match execute_tool(&name, args_json, &session_dir).await {
-                    Ok(res) => res,
-                    Err(err) => format!("Error executing tool: {}", err),
+                let result = if needs_cpu_semaphore(&name) {
+                    //和main.rs的task公用同一信号量
+                    let semaphore = cpu_task_semaphore.clone();
+                    match semaphore.clone().try_acquire_owned() {
+                        Ok(permit) => {
+                            let _ = tx.send(Ok(Event::default()
+                                .json_data(AgentEvent::ToolStatus {
+                                    tool_call_id: tool_id.clone(),
+                                    status: "running".to_string(),
+                                    message: None,
+                                })
+                                .unwrap()));
+
+                            let res = match execute_tool(&name, args_json, &tool_call_dir).await {
+                                Ok(v) => v,
+                                Err(err) => format!("Error executing tool: {}", err),
+                            };
+                            drop(permit);
+                            res
+                        }
+                        Err(TryAcquireError::NoPermits) => {
+                            let _ = tx.send(Ok(Event::default()
+                                .json_data(AgentEvent::ToolStatus {
+                                    tool_call_id: tool_id.clone(),
+                                    status: "waiting".to_string(),
+                                    message: Some(
+                                        "Tool is waiting for an available worker slot..."
+                                            .to_string(),
+                                    ),
+                                })
+                                .unwrap()));
+
+                            match semaphore.acquire_owned().await {
+                                Ok(permit) => {
+                                    let _ = tx.send(Ok(Event::default()
+                                        .json_data(AgentEvent::ToolStatus {
+                                            tool_call_id: tool_id.clone(),
+                                            status: "running".to_string(),
+                                            message: None,
+                                        })
+                                        .unwrap()));
+
+                                    let res = match execute_tool(&name, args_json, &tool_call_dir)
+                                        .await
+                                    {
+                                        Ok(v) => v,
+                                        Err(err) => format!("Error executing tool: {}", err),
+                                    };
+                                    drop(permit);
+                                    res
+                                }
+                                Err(err) => {
+                                    format!("Error acquiring shared cpu semaphore: {}", err)
+                                }
+                            }
+                        }
+                        Err(TryAcquireError::Closed) => {
+                            "Error acquiring shared cpu semaphore: closed".to_string()
+                        }
+                    }
+                } else {
+                    match execute_tool(&name, args_json, &tool_call_dir).await {
+                        Ok(res) => res,
+                        Err(err) => format!("Error executing tool: {}", err),
+                    }
                 };
 
-                if let Some(terminal_tool) = &selected_skill.terminal_tool {
-                    if &name == terminal_tool && !result.starts_with("Error executing tool:") {
-                        tools_enabled = false;
-                        terminal_reached_in_batch = true;
-                        messages.push(serde_json::json!({
-                            "role": "system",
-                            "content": format!(
-                                "Skill '{}' stop condition reached by tool '{}'. Do not call more tools and produce final answer.",
-                                selected_skill.id,
-                                terminal_tool
-                            )
-                        }));
-                    }
-                }
+                let clipped_result = truncate_text(&result, agent_config.max_tool_result_chars);
 
                 debug_log(&format!(
                     "Tool finished: name={}, result_len={}",
                     name,
-                    result.len()
+                    clipped_result.len()
                 ));
 
                 let _ = tx.send(Ok(Event::default()
                     .json_data(AgentEvent::ToolResult {
-                        content: result.clone(),
+                        tool_call_id: tool_id.clone(),
+                        content: clipped_result.clone(),
                     })
                     .unwrap()));
 
@@ -909,7 +671,7 @@ async fn run_agent_loop(
                     "role": "tool",
                     "name": name,
                     "tool_call_id": tool_id,
-                    "content": result,
+                    "content": clipped_result,
                 }));
             }
         } else {
@@ -918,6 +680,42 @@ async fn run_agent_loop(
             break;
         }
     }
+
+    let mut history_to_save = if messages.len() > 2 {
+        messages[2..].to_vec() //历史记录不保存第一条系统提示和第二天skill提示，因为系统提示是固定的，而skill提示每次用户发消息都可能变化
+    } else {
+        messages.clone()
+    };
+
+    let user_turns = count_user_turns(&history_to_save);
+    if user_turns > 0
+        && user_turns % agent_config.summary_every_user_turns == 0
+        && let Some(summary) = generate_history_summary(
+            &client,
+            &agent_config.summary.model,
+            &agent_config.summary.api,
+            &api_key,
+            &history_to_save,
+        )
+        .await
+    {
+        //
+        history_to_save.retain(|m| {
+            !(get_role(m) == Some("system")
+                && get_content(m)
+                    .map(|c| c.starts_with(SUMMARY_MARKER))
+                    .unwrap_or(false))
+        });
+        history_to_save.insert(
+            0,
+            serde_json::json!({
+                "role": "system",
+                "content": format!("{}\n{}", SUMMARY_MARKER, summary)
+            }),
+        );
+    }
+
+    let _ = write_history(&history_file, &history_to_save).await;
 
     Ok(())
 }

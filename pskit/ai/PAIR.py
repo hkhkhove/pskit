@@ -30,8 +30,12 @@ class ContrastiveLearningModel(nn.Module):
 
 
 def rna_seq_embbding(seqs, device):
-    # Load RNA-FM model
-    EmbbingModel, alphabet = fm.pretrained.rna_fm_t12()
+    model_path = path.get("rna-fm")
+    if not os.path.exists(model_path):
+        EmbbingModel, alphabet = fm.pretrained.rna_fm_t12()
+    else:
+        EmbbingModel, alphabet = fm.pretrained.fm.pretrained.rna_fm_t12(model_location=model_path)
+
     batch_converter = alphabet.get_batch_converter()
     EmbbingModel.to(device)
     EmbbingModel.eval()  # disables dropout for deterministic results
@@ -51,7 +55,11 @@ def rna_seq_embbding(seqs, device):
 
 
 def prot_seq_embbding(seqs, device):
-    EmbbingModel, alphabet = esm.pretrained.esm2_t30_150M_UR50D()
+    model_path = path.get("esm2_150M")
+    if not os.path.exists(model_path):
+        EmbbingModel, alphabet = esm.pretrained.esm2_t30_150M_UR50D()
+    else:
+        EmbbingModel, alphabet = esm.pretrained.load_model_and_alphabet_local(model_path)
     batch_converter = alphabet.get_batch_converter()
     EmbbingModel.to(device)
     EmbbingModel.eval()  # disables dropout for deterministic results
@@ -68,6 +76,36 @@ def prot_seq_embbding(seqs, device):
     token_embeddings_cpu = token_embeddings.to("cpu")
 
     return token_embeddings_cpu
+
+
+def agent_run(protein_seq, nucleic_acid_seq, output_dir):
+    device = torch.device("cpu")
+
+    model_path = path.get("pair_model")
+    if not os.path.exists(model_path):
+        return f"Model file not found: {model_path}"
+
+    model = ContrastiveLearningModel(model_dim=128)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
+    model.eval()
+
+    try:
+        rna_embbding = rna_seq_embbding([nucleic_acid_seq], device)
+        prot_embbding = prot_seq_embbding([protein_seq], device)
+
+        with torch.no_grad():
+            output = model(rna_embbding, prot_embbding)
+            output = torch.sigmoid(output)
+
+        with open(os.path.join(output_dir, "predictions.csv"), "w") as f:
+            f.write("Protein,Nucleic Acid,Binding Score\n")
+            f.write(f"{protein_seq},{nucleic_acid_seq},{round(output[0][0].item(), 3)}\n")
+
+    except Exception as e:
+        return str(e) + "\n" + traceback.format_exc()
+
+    return f"result file: {os.path.join(output_dir, 'predictions.csv')}"
 
 
 def main(paris, input_dir, output_dir):
@@ -105,11 +143,14 @@ def main(paris, input_dir, output_dir):
 
 
 if __name__ == "__main__":
-    paris = [
-        (
-            "MEYASDASLDPEAPWPPAPRARACRVLPWALVAGLLLLLLLAAACAVFLACPWAVSGARASPGSAASPRLREGPELSPDDPAGLLDLRQGMFAQLVAQNVLLIDGPLSWYSDPGLAGVSLTGGLSYKEDTKELVVAKAGVYYVFFQLELRRVVAGEGSGSVSLALHLQPLRSAAGAAALALTVDLPPASSEARNSAFGFQGRLLHLSAGQRLGVHLHTEARARHAWQLTQGATVLGLFRVTPEIPAGLPSPRSE",
-            "GGGAGAGAGGAAGAGGGAUGGGCGACCGAACGUGCCCUUCAAAGCCGUUCACUAACCAGUGGCAUAACCCAGAGGUCGAUAGUACUGGUCCCCCC",
-        ),
-        ("QELLCAASLISDRWVLTAAHCLLYPPWDKNFTVNDILVRIGKYARSRYERNMEKISTLEKIIIHPGYNWRENLDRDIALMKLKKPVAFSDYIHPVCLPDKQIVTSLLQAGHKGRVTGWGNLKEMWTVNMNEVQPSVLQMVNLPLVERPICKASTGIRVTDNMFCAGYKPEEGKRGDACEGDSGGPFVMKNPYNNRWYQMGIVSWGEGCDRDGKYGFYTHVFRLKKWIRKMVDRFG", "GCCCGAUCUACUGCAUUACCGAAACGAUUUCCCCACUGU"),
-    ]
-    main(paris, "./", "./")
+    # for agent_run
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run PAIR agent")
+    parser.add_argument("--protein_seq", type=str, required=True, help="Protein sequence")
+    parser.add_argument("--nucleic_acid_seq", type=str, required=True, help="Nucleic acid sequence")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save output")
+    args = parser.parse_args()
+
+    result = agent_run(args.protein_seq, args.nucleic_acid_seq, args.output_dir)
+    print(result)

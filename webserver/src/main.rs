@@ -5,7 +5,7 @@ use axum::{
     response::{Json, Response},
     routing::{get, post},
 };
-use dotenvy::{dotenv, from_path};
+use dotenvy::from_path;
 use sqlx::SqlitePool;
 use std::{collections::HashMap, env, path::PathBuf, sync::Arc};
 use tokio::{
@@ -19,9 +19,7 @@ mod agent;
 mod config;
 mod database;
 mod models;
-mod skills;
 mod tasks;
-mod tools;
 
 use config::Config;
 use models::{File, Task, TaskCreateResponse, TaskResponse, TaskResultsResponse, TaskStatus};
@@ -354,14 +352,12 @@ async fn task_dispatcher(
 async fn main() {
     println!("Usage: pskit-webserver <work_dir> <address> <max_workers>");
 
-    let _ = dotenv();
-
     let home = env::args()
         .nth(1)
         .map(|arg| PathBuf::from(arg))
         .unwrap_or_else(|| PathBuf::from("./"));
 
-    let _ = from_path(home.join("webserver").join(".env"));
+    let _ = from_path(home.join(".env"));
 
     let addr = env::args().nth(2).unwrap_or("127.0.0.1:10706".to_string());
 

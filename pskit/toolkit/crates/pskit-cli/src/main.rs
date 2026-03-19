@@ -33,7 +33,6 @@ impl FormatArg {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum ContactMode {
     D,
-    D2,
     Knn,
 }
 
@@ -74,9 +73,9 @@ enum Commands {
         format: FormatArg,
         #[arg(short, long)]
         chain: String,
-        #[arg(long)]
+        #[arg(long, default_value = None)]
         start: Option<isize>,
-        #[arg(long)]
+        #[arg(long, default_value = None)]
         end: Option<isize>,
         #[arg(short, long)]
         output: PathBuf,
@@ -171,7 +170,6 @@ fn run() -> Result<(), String> {
             let reader = open_reader(&input)?;
             let (axis, values) = match mode {
                 ContactMode::D => contact::d_map(reader, chain, format.as_core_format())?,
-                ContactMode::D2 => contact::d2_map(reader, chain, format.as_core_format())?,
                 ContactMode::Knn => {
                     let actual_k = k.ok_or_else(|| "--k is required for mode=knn".to_string())?;
                     contact::knn_map(reader, chain, actual_k, format.as_core_format())?

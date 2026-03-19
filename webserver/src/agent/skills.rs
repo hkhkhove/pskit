@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,9 +10,9 @@ pub struct Skill {
     pub workflow: Vec<String>,
     pub allowed_tools: Vec<String>,
     pub stop_when: String,
-    pub terminal_tool: Option<String>,
-    #[serde(default)]
-    pub max_calls_per_tool: HashMap<String, usize>,
+    // pub terminal_tool: Option<String>,
+    // #[serde(default)]
+    // pub max_calls_per_tool: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,19 +22,19 @@ struct SkillCatalog {
 
 pub fn load_skills() -> anyhow::Result<Vec<Skill>> {
     let config_path = crate::config::Config::home()
-        .join("webserver")
-        .join("config")
-        .join("skills.json");
+        .join("agent_config")
+        .join("skills.toml");
     let content = std::fs::read_to_string(&config_path)
-        .unwrap_or_else(|_| include_str!("../config/skills.json").to_string());
-    let catalog: SkillCatalog = serde_json::from_str(&content)?;
+        .map_err(|e| anyhow::anyhow!("Failed to read skills config: {}", e))?;
+    let catalog: SkillCatalog = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse skills config: {}", e))?;
     Ok(catalog.skills)
 }
 
 pub fn default_skill(skills: &[Skill]) -> Option<Skill> {
     skills
         .iter()
-        .find(|s| s.id == "binding_pair_annotation")
+        .find(|s| s.id == "default_fallback")
         .cloned()
         .or_else(|| skills.first().cloned())
 }
@@ -64,9 +63,10 @@ pub fn render_skill_prompt(skill: &Skill) -> String {
         skill.stop_when,
     )
 }
-
+//让LLM选择匹配的skill
 pub async fn select_skill_with_llm(
     client: &reqwest::Client,
+    model: &str,
     api_url: &str,
     api_key: &str,
     user_message: &str,
@@ -86,7 +86,7 @@ pub async fn select_skill_with_llm(
     );
 
     let request_body = serde_json::json!({
-        "model": "gemini-3-flash-preview",
+        "model": model,
         "stream": false,
         "messages": [
             {

@@ -6,3 +6,4 @@ transformers==4.28.1
 fair-esm==2.0.0
 torchdrug==0.2.1
 numpy==1.24.4
+rna-fm==0.2.2

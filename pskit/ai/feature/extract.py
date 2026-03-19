@@ -68,7 +68,7 @@ def standardization(data, epsilon=1e-8):
     return (data - mu) / sigma
 
 
-def combine(pdb_files):
+def combine(pdb_files, output_dir):
     success_combine = []
     error_combine = {}
 
@@ -76,8 +76,8 @@ def combine(pdb_files):
         try:
             prot_name, ext = os.path.splitext(os.path.basename(pdb_file))
 
-            esm2_file = pdb_file.replace(ext, "_esm2.npy")
-            saprot_file = pdb_file.replace(ext, "_saprot.npy")
+            esm2_file = os.path.join(output_dir, prot_name + "_esm2.npy")
+            saprot_file = os.path.join(output_dir, prot_name + "_saprot.npy")
 
             if not os.path.exists(esm2_file):
                 error_combine[prot_name + ext] = "Extract ESM2 feature failed"
@@ -98,7 +98,7 @@ def combine(pdb_files):
 
             node_feats = np.concatenate([esm2_rep, saprot_rep], axis=1)
 
-            input_data_file = pdb_file.replace(ext, "_input.pkl")
+            input_data_file = os.path.join(output_dir, prot_name + "_input.pkl")
 
             with open(input_data_file, "wb") as f:
                 pickle.dump((prot_name, node_feats, coords, edges, edge_attr), f)
@@ -110,7 +110,7 @@ def combine(pdb_files):
     return success_combine, error_combine
 
 
-def run(pdb_files, path):
+def run(pdb_files, output_dir, path):
     """
     Extract features for binding site prediction.
 
@@ -122,11 +122,8 @@ def run(pdb_files, path):
         List of successfully processed PDB file paths
     """
 
-    # Get input directory from first file
-    input_dir = os.path.dirname(pdb_files[0])
-
-    extract_ESM2_feats(input_dir, input_dir, path)
-    extract_SaProt_feats(input_dir, input_dir, path)
-    success_combine, error_combine = combine(pdb_files)
+    extract_ESM2_feats(pdb_files, output_dir, path)
+    extract_SaProt_feats(pdb_files, output_dir, path)
+    success_combine, error_combine = combine(pdb_files, output_dir)
 
     return success_combine, error_combine

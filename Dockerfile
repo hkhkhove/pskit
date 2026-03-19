@@ -40,6 +40,11 @@ RUN cargo build --release
 
 RUN install -D -m 0755 target/release/pskit-webserver /out/pskit-webserver
 
+WORKDIR /app/pskit/toolkit/crates/pskit-cli
+RUN cargo build --release
+
+RUN install -D -m 0755 /app/pskit/toolkit/target/release/pskit-cli /out/pskit-cli
+
 WORKDIR /app/pskit/toolkit/crates/pskit-wasm
 RUN cargo build --lib --target wasm32-unknown-unknown --release
 RUN wasm-bindgen /app/pskit/toolkit/target/wasm32-unknown-unknown/release/pskit_wasm.wasm \
@@ -47,7 +52,7 @@ RUN wasm-bindgen /app/pskit/toolkit/target/wasm32-unknown-unknown/release/pskit_
     --target bundler
 
 WORKDIR /app
-RUN git clone https://github.com/PDB-REDO/dssp.git
+RUN git clone https://github.com/PDB-REDO/dssp.git --depth 1
 
 WORKDIR /app/dssp
 
@@ -110,8 +115,10 @@ RUN python -m pip install --no-cache-dir -r /app/requirements.txt
 
 WORKDIR /app
 COPY pskit/ai/ /app/pskit/ai/
+COPY agent_config/ /app/agent_config/
 
 COPY --from=rust-builder /out/pskit-webserver /usr/local/bin/pskit-webserver
+COPY --from=rust-builder /out/pskit-cli /usr/local/bin/pskit-cli
 COPY --from=rust-builder /usr/local/bin/mkdssp /usr/local/bin/mkdssp
 COPY --from=rust-builder /usr/local/share/libcifpp/ /usr/local/share/libcifpp/
 COPY --from=rust-builder /usr/local/share/man/ /usr/local/share/man/

@@ -1,0 +1,178 @@
+[[tools]]
+name = "search_pdb"
+description = "Search the RCSB PDB for protein/nucleic acid structures using natural language keywords."
+[tools.parameters]
+type = "object"
+required = ["query"]
+[tools.parameters.properties.query]
+type = "string"
+description = "Keywords to search for, e.g., 'human p53 DNA complex'"
+
+[[tools]]
+name = "download_pdb_file"
+description = "Download a structure file from RCSB by PDB ID and save it into the current agent session."
+[tools.parameters]
+type = "object"
+required = ["pdb_id"]
+[tools.parameters.properties.pdb_id]
+type = "string"
+description = "4-character PDB ID, e.g., '8W2S'"
+[tools.parameters.properties.format]
+type = "string"
+enum = ["cif", "pdb"]
+description = "File format to download. Defaults to cif."
+
+[[tools]]
+name = "fetch_pdb_info"
+description = "Get metadata for a specific PDB ID (resolution, species, chain entities, etc.)."
+[tools.parameters]
+type = "object"
+required = ["pdb_id"]
+[tools.parameters.properties.pdb_id]
+type = "string"
+description = "4-character PDB ID, e.g., '1TUP'"
+
+[[tools]]
+name = "split_pdb_by_chain"
+description = "Split a PDB/mmCIF file into separate chain files."
+[tools.parameters]
+type = "object"
+required = ["pdb_path", "format"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+[tools.parameters.properties.format]
+type = "string"
+enum = ["cif", "pdb"]
+description = "File format of the input structure, pdb or cif."
+
+[[tools]]
+name = "split_complex"
+description = "Split PDB/mmCIF file into separate parts by molecule type (protein/nucleic acid)."
+[tools.parameters]
+type = "object"
+required = ["pdb_path", "format"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+[tools.parameters.properties.format]
+type = "string"
+enum = ["cif", "pdb"]
+description = "File format of the input structure, pdb or cif."
+
+[[tools]]
+name = "extract_fragment"
+description = "Extract a chain fragment from a structure file."
+[tools.parameters]
+type = "object"
+required = ["pdb_path", "chain", "format"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+[tools.parameters.properties.chain]
+type = "string"
+[tools.parameters.properties.format]
+type = "string"
+enum = ["cif", "pdb"]
+description = "File format of the input structure, pdb or cif."
+[tools.parameters.properties.start]
+type = "integer"
+description = "1-based starting position in the chain. Default: start of chain"
+[tools.parameters.properties.end]
+type = "integer"
+description = "1-based ending position in the chain. Default: end of chain"
+
+[[tools]]
+name = "calculate_contact_map"
+description = "Calculate contact map JSON from structure."
+[tools.parameters]
+type = "object"
+required = ["pdb_path", "format"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+[tools.parameters.properties.chain]
+type = "string"
+[tools.parameters.properties.format]
+type = "string"
+enum = ["cif", "pdb"]
+description = "File format of the input structure, pdb or cif."
+[tools.parameters.properties.mode]
+type = "string"
+enum = ["d", "knn"]
+description = "Contact map calculation mode: distance-based (d) or k-nearest neighbors (knn). Default: d"
+[tools.parameters.properties.k]
+type = "integer"
+description = "Number of neighbors for knn mode. Required if mode=knn."
+
+[[tools]]
+name = "annotate_binding_pairs"
+description = "Annotate protein-nucleic acid binding residue pairs."
+[tools.parameters]
+type = "object"
+required = ["pdb_path", "format"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+[tools.parameters.properties.format]
+type = "string"
+enum = ["cif", "pdb"]
+description = "File format of the input structure, pdb or cif."
+[tools.parameters.properties.cutoff]
+type = "number"
+description = "Cutoff distance for binding pair annotation. Default: 3.5"
+
+[[tools]]
+name = "predict_binding_sites"
+description = "Predict DNA/RNA binding sites using PSKit ai model."
+[tools.parameters]
+type = "object"
+required = ["pdb_path", "ligand_type"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+description = "Structure file path for input"
+[tools.parameters.properties.ligand_type]
+type = "string"
+enum = ["DNA", "RNA"]
+
+[[tools]]
+name = "extract_empirical_features"
+description = "Extract empirical features via run_pskit emp_feats."
+[tools.parameters]
+type = "object"
+required = ["pdb_path"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+description = "Structure file path for input"
+[tools.parameters.properties.emp_feats]
+type = "string"
+description = "comma-separated features, including dssp and rosetta, e.g., 'dssp,rosetta'. Default: dssp"
+[tools.parameters.properties.rosetta_relax]
+type = "string"
+enum = ["true", "false"]
+description = "Whether to relax the structure with Rosetta. Default: false"
+
+[[tools]]
+name = "read_result_file"
+description = "Read a result text file with token-safe truncation (line range + char limit)."
+[tools.parameters]
+type = "object"
+required = ["file_path"]
+[tools.parameters.properties.file_path]
+type = "string"
+description = "Path to result file (relative to current session or absolute inside current session)."
+[tools.parameters.properties.start_line]
+type = "integer"
+description = "1-based starting line number. Default: 1"
+[tools.parameters.properties.max_lines]
+type = "integer"
+description = "Maximum number of lines to read. Default: 1000. Do not set below 1000 to avoid excessive truncation cutting key information. Max allowed is 5000."
+[tools.parameters.properties.max_chars]
+type = "integer"
+description = "Maximum number of characters to return. Default: 12000. Do not set below 12000 to avoid excessive truncation cutting key information. Max allowed is 20000."
+
+[[tools]]
+name = "predict_interaction"
+description = "Predict protein-nucleic acid interaction from sequence pairs."
+[tools.parameters]
+type = "object"
+required = ["protein_seq", "nucleic_seq"]
+[tools.parameters.properties.protein_seq]
+type = "string"
+[tools.parameters.properties.nucleic_seq]
+type = "string"

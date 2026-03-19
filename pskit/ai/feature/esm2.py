@@ -62,7 +62,7 @@ def inference(model, input, save_path):
     np.save(save_path, rep_numpy)
 
 
-def run(input_dir, output_dir, path):
+def run(pdb_files, output_dir, path):
     error = {}
 
     device = torch.device("cpu")
@@ -75,7 +75,6 @@ def run(input_dir, output_dir, path):
     model.eval()
     batch_converter = alphabet.get_batch_converter()
 
-    pdb_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith(".pdb") or f.endswith(".cif")]
     os.makedirs(output_dir, exist_ok=True)
 
     for pdb_file in pdb_files:
