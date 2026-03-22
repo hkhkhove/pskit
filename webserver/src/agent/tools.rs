@@ -324,7 +324,7 @@ pub async fn execute_tool(
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("{}", Uuid::new_v4()));
             let cutoff = args["cutoff"].as_f64().unwrap_or(3.5);
-            let output_file = output_dir.join(format!("{}_binding_pairs.tsv", filename));
+            let output_file = output_dir.join(format!("{}_binding_pairs.csv", filename));
             let format = args["format"]
                 .as_str()
                 .ok_or("Missing format")?

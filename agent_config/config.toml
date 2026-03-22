@@ -11,4 +11,4 @@ max_agent_steps = 30
 max_tool_calls = 60
 recent_user_turns_window = 12
 summary_every_user_turns = 8
-max_tool_result_chars = 4000
+max_tool_result_chars = 8000

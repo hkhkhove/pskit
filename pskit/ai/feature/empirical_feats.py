@@ -155,9 +155,11 @@ def run_rosetta_score(input_dir, output_dir, do_relax):
 def agent_run(pdb_path, output_dir, emp_feats, rosetta_relax):
     os.makedirs(output_dir, exist_ok=True)
     res = ""
+    in_path = Path(pdb_path)
+    stem = in_path.stem
 
     if "dssp" in emp_feats:
-        dssp_file = os.path.join(output_dir, os.path.splitext(os.path.basename(pdb_path))[0] + ".dssp")
+        dssp_file = os.path.join(output_dir, stem + ".dssp")
         cmd = [mypath["dssp"], "--output-format", "dssp", pdb_path, dssp_file]
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if result.returncode != 0:
@@ -182,7 +184,14 @@ def agent_run(pdb_path, output_dir, emp_feats, rosetta_relax):
             ]
         )
 
-        structure_to_score = pdb_path
+        structure_to_score = in_path
+        if in_path.suffix.lower() in {".cif"}:
+            converted = _cif_to_pdb_if_possible(in_path)
+            if converted is not None:
+                structure_to_score = converted
+            else:
+                structure_to_score = in_path
+
         if rosetta_relax:
             relax_cmd = [
                 relax_exe,
@@ -204,14 +213,14 @@ def agent_run(pdb_path, output_dir, emp_feats, rosetta_relax):
             if result.returncode != 0:
                 return f"{pdb_path}: Rosetta relax failed: {result.stderr}"
 
-            relaxed_pdb = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(pdb_path))[0]}_relaxed_0001.pdb")
+            relaxed_pdb = os.path.join(output_dir, f"{stem}_relaxed_0001.pdb")
 
             if not os.path.exists(relaxed_pdb):
                 return f"{pdb_path}: Rosetta relax failed"
 
             structure_to_score = relaxed_pdb
 
-        scorefile = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(pdb_path))[0]}_score.txt")
+        scorefile = os.path.join(output_dir, f"{stem}_score.txt")
         score_cmd = [
             score_exe,
             "-in:file:s",
@@ -257,7 +266,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Run empirical features extraction")
-    parser.add_argument("--pdb_file", type=str, required=True, help="Path to input PDB file")
+    parser.add_argument("--pdb_path", type=str, required=True, help="Path to input PDB file")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save output")
     parser.add_argument("--emp_feats", type=str, default="dssp", help="Comma-separated features, including dssp and rosetta, e.g., 'dssp,rosetta'. Default: dssp")
     parser.add_argument("--rosetta_relax", type=str, default="false", choices=["true", "false"], help="Whether to perform Rosetta relax. Default: false")
@@ -266,5 +275,5 @@ if __name__ == "__main__":
     emp_feats_list = [f.strip().lower() for f in args.emp_feats.split(",") if f.strip()]
     rosetta_relax_bool = args.rosetta_relax.lower() == "true"
 
-    result = agent_run(args.pdb_file, args.output_dir, emp_feats_list, rosetta_relax_bool)
+    result = agent_run(args.pdb_path, args.output_dir, emp_feats_list, rosetta_relax_bool)
     print(result)

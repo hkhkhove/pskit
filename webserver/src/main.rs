@@ -43,7 +43,7 @@ async fn root() -> Json<serde_json::Value> {
 // 接收用户上传的任务，添加到任务队列
 // 如果 Ok(Json(...))，就返回一个 200 状态码、JSON 格式的 HTTP 响应
 // 如果 Err((StatusCode, String))，axum 会自动把这个元组转换成 HTTP 响应
-async fn upload_task(
+async fn upload_handler(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Json<TaskCreateResponse>, (StatusCode, String)> {
@@ -154,7 +154,7 @@ async fn upload_task(
 }
 
 // 获取特定任务状态
-async fn get_task_status(
+async fn status_handler(
     State(state): State<AppState>,
     Path(task_id): Path<String>,
 ) -> Result<Json<TaskResponse>, (StatusCode, String)> {
@@ -203,7 +203,7 @@ async fn get_task_status(
     Ok(Json(response))
 }
 
-async fn get_results(
+async fn results_handler(
     Path(task_id): Path<String>,
 ) -> Result<Json<TaskResultsResponse>, (StatusCode, String)> {
     let home = Config::home();
@@ -256,7 +256,7 @@ async fn get_results(
     }))
 }
 
-async fn download_result_file(
+async fn download_handler(
     Path((task_id, filename)): Path<(String, String)>,
 ) -> Result<Response, (StatusCode, String)> {
     let home = Config::home();
@@ -409,13 +409,10 @@ async fn main() {
 
     let api_routes = Router::new()
         .route("/", get(root))
-        .route("/tasks", post(upload_task))
-        .route("/tasks/{task_id}", get(get_task_status))
-        .route("/tasks/{task_id}/results", get(get_results))
-        .route(
-            "/tasks/{task_id}/results/{filename}",
-            get(download_result_file),
-        )
+        .route("/tasks", post(upload_handler))
+        .route("/tasks/{task_id}", get(status_handler))
+        .route("/tasks/{task_id}/results", get(results_handler))
+        .route("/tasks/{task_id}/results/{filename}", get(download_handler))
         .nest("/agent", agent::agent_routes())
         .layer(DefaultBodyLimit::max(250 * 1024 * 1024)) // 250 MB limit for file uploads
         .with_state(app_state);

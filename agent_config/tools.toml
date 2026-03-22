@@ -34,7 +34,10 @@ description = "4-character PDB ID, e.g., '1TUP'"
 
 [[tools]]
 name = "split_pdb_by_chain"
-description = "Split a PDB/mmCIF file into separate chain files."
+description = """
+Split a PDB/mmCIF file into separate chain files.\
+If user only wants extract specific chains, use extract_fragment instead.\
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "format"]
@@ -60,7 +63,10 @@ description = "File format of the input structure, pdb or cif."
 
 [[tools]]
 name = "extract_fragment"
-description = "Extract a chain fragment from a structure file."
+description = """
+Extract a chain fragment from a structure file.\
+To extract a whole chain, leave start and end as default.\
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "chain", "format"]
@@ -81,7 +87,12 @@ description = "1-based ending position in the chain. Default: end of chain"
 
 [[tools]]
 name = "calculate_contact_map"
-description = "Calculate contact map JSON from structure."
+description = """
+Calculate contact map JSON from structure.\
+Output is a json file containing two keys:"axis" and "values".\
+"axis" is a list of residue identifiers (chain-residue number-residue name).\
+"values" is a list of upper triangular matrix values representing the contact map without diagonal elements, where the order corresponds to "axis".\
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "format"]
@@ -103,7 +114,11 @@ description = "Number of neighbors for knn mode. Required if mode=knn."
 
 [[tools]]
 name = "annotate_binding_pairs"
-description = "Annotate protein-nucleic acid binding residue pairs."
+description = """
+Annotate protein-nucleic acid binding residue pairs.\
+Output is a csv file with two clomns:"pair" and "distance".\
+"pair" is a string in the format of "chain1-resnum1-resname1_chain2-resnum2-resname2".\
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "format"]
@@ -119,7 +134,10 @@ description = "Cutoff distance for binding pair annotation. Default: 3.5"
 
 [[tools]]
 name = "predict_binding_sites"
-description = "Predict DNA/RNA binding sites using PSKit ai model."
+description = """
+Predict DNA/RNA binding sites using PSKit ai model.\
+Output is a csv file with four columns: chain,residue_number,residue_name,score.\
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "ligand_type"]
@@ -132,7 +150,10 @@ enum = ["DNA", "RNA"]
 
 [[tools]]
 name = "extract_empirical_features"
-description = "Extract empirical features via run_pskit emp_feats."
+description = """
+Extract empirical features including DSSP and Rosetta Score.\
+Dot not make rosetta relax unless user explicitly asks for it, as it can be time consuming.\
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_path"]
@@ -155,7 +176,7 @@ type = "object"
 required = ["file_path"]
 [tools.parameters.properties.file_path]
 type = "string"
-description = "Path to result file (relative to current session or absolute inside current session)."
+description = "Path to result file. (Absolute path)"
 [tools.parameters.properties.start_line]
 type = "integer"
 description = "1-based starting line number. Default: 1"
@@ -171,8 +192,8 @@ name = "predict_interaction"
 description = "Predict protein-nucleic acid interaction from sequence pairs."
 [tools.parameters]
 type = "object"
-required = ["protein_seq", "nucleic_seq"]
+required = ["protein_seq", "nucleic_acid_seq"]
 [tools.parameters.properties.protein_seq]
 type = "string"
-[tools.parameters.properties.nucleic_seq]
+[tools.parameters.properties.nucleic_acid_seq]
 type = "string"

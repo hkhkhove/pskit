@@ -168,7 +168,7 @@ fn run() -> Result<(), String> {
             k,
         } => {
             let reader = open_reader(&input)?;
-            let (axis, values) = match mode {
+            let (axis, mut values) = match mode {
                 ContactMode::D => contact::d_map(reader, chain, format.as_core_format())?,
                 ContactMode::Knn => {
                     let actual_k = k.ok_or_else(|| "--k is required for mode=knn".to_string())?;
@@ -176,7 +176,13 @@ fn run() -> Result<(), String> {
                 }
             };
 
+            values
+                .iter_mut()
+                .flatten()
+                .for_each(|v| *v = (*v * 1000.0).round() / 1000.0);
+
             let payload = ContactMapOutput { axis, values };
+
             let content = serde_json::to_vec_pretty(&payload)
                 .map_err(|e| format!("serialize contact map failed: {e}"))?;
             write_bytes(&output, &content)?;
@@ -191,7 +197,7 @@ fn run() -> Result<(), String> {
         } => {
             let reader = open_reader(&input)?;
             let pairs = annotate::compute_binding_pairs(reader, cutoff, format.as_core_format())?;
-            write_pairs_tsv(&output, &pairs)?;
+            write_pairs_csv(&output, &pairs)?;
             println!("written: {}", output.display());
             Ok(())
         }
@@ -235,7 +241,7 @@ fn write_named_chunks(
     Ok(())
 }
 
-fn write_pairs_tsv(path: &Path, pairs: &[(String, f64)]) -> Result<(), String> {
+fn write_pairs_csv(path: &Path, pairs: &[(String, f64)]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
@@ -243,11 +249,11 @@ fn write_pairs_tsv(path: &Path, pairs: &[(String, f64)]) -> Result<(), String> {
 
     let mut file =
         File::create(path).map_err(|e| format!("failed to create {}: {e}", path.display()))?;
-    file.write_all(b"pair\tdistance\n")
+    file.write_all(b"pair,distance\n")
         .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
 
     for (pair, distance) in pairs {
-        writeln!(file, "{pair}\t{distance:.3}")
+        writeln!(file, "{pair},{distance:.3}")
             .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
     }
 

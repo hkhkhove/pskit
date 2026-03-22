@@ -6,10 +6,10 @@ pub struct Skill {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub when_to_use: String,
+    // pub when_to_use: String,
     pub workflow: Vec<String>,
     pub allowed_tools: Vec<String>,
-    pub stop_when: String,
+    // pub stop_when: String,
     // pub terminal_tool: Option<String>,
     // #[serde(default)]
     // pub max_calls_per_tool: HashMap<String, usize>,
@@ -53,14 +53,14 @@ pub fn render_skill_prompt(skill: &Skill) -> String {
         .join("\n");
 
     format!(
-        "[Skill Selected]\nID: {}\nName: {}\nDescription: {}\nWhen to use: {}\nWorkflow:\n{}\nAllowed tools: {}\nStop condition: {}\nAfter stop condition is met, do not call more tools and provide final concise answer.",
+        "[Skill Selected]\nID: {}\nName: {}\nDescription: {}\nWorkflow:\n{}\nAllowed tools: {}\n",
         skill.id,
         skill.name,
         skill.description,
-        skill.when_to_use,
+        // skill.when_to_use,
         workflow,
         skill.allowed_tools.join(", "),
-        skill.stop_when,
+        // skill.stop_when,
     )
 }
 //让LLM选择匹配的skill
@@ -74,10 +74,7 @@ pub async fn select_skill_with_llm(
 ) -> anyhow::Result<Option<String>> {
     let mut skill_lines = Vec::new();
     for skill in skills {
-        skill_lines.push(format!(
-            "- {}: {} | when: {}",
-            skill.id, skill.description, skill.when_to_use
-        ));
+        skill_lines.push(format!("- {}: {}", skill.id, skill.description));
     }
 
     let selector_prompt = format!(
