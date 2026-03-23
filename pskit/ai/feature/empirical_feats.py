@@ -3,7 +3,10 @@ import subprocess
 from pathlib import Path
 import shutil
 import traceback
+import warnings
 from ..config import path as mypath
+
+warnings.filterwarnings("ignore")
 
 
 def run_dssp_single(pdb_path, output_dir):

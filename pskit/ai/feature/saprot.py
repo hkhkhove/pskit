@@ -1,6 +1,5 @@
 import os
 import warnings
-import gc
 import subprocess
 import numpy as np
 import torch

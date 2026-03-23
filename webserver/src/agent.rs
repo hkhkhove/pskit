@@ -158,17 +158,30 @@ async fn chat_handler(
     //只是引用计数加一，指向的还是同一信号量
     let cpu_task_semaphore = state.cpu_task_semaphore.clone();
 
-    tokio::spawn(async move {
-        if let Err(e) =
-            run_agent_loop(req.message, session_id, cpu_task_semaphore, tx.clone()).await
+    let worker_tx = tx.clone();
+    let worker = tokio::spawn(async move {
+        if let Err(e) = run_agent_loop(
+            req.message,
+            session_id,
+            cpu_task_semaphore,
+            worker_tx.clone(),
+        )
+        .await
         {
-            let _ = tx.send(Ok(Event::default()
+            let _ = worker_tx.send(Ok(Event::default()
                 .json_data(AgentEvent::Error {
                     message: e.to_string(),
                 })
                 .unwrap()));
         }
-        let _ = tx.send(Ok(Event::default().json_data(AgentEvent::Done).unwrap()));
+        let _ = worker_tx.send(Ok(Event::default().json_data(AgentEvent::Done).unwrap()));
+    });
+
+    let close_watch_tx = tx.clone();
+    let abort_handle = worker.abort_handle();
+    tokio::spawn(async move {
+        close_watch_tx.closed().await;
+        abort_handle.abort();
     });
 
     let stream = UnboundedReceiverStream::new(rx);

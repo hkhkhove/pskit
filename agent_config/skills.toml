@@ -114,7 +114,7 @@ workflow = [
     "Use predict_interaction(protein_sequence, nucleic_sequence).",
     "Use read_result_file to read the whole result file and summarize key predicted interaction likelihood or classification for user interpretation.",
 ]
-allowed_tools = ["predict_interaction"]
+allowed_tools = ["predict_interaction", "read_result_file"]
 
 [[skills]]
 id = "all-round_skill"

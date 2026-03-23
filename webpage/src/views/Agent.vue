@@ -6,7 +6,6 @@ import DOMPurify from 'dompurify';
 import { nanoid } from 'nanoid';
 
 const STREAM_FLUSH_INTERVAL_MS = 50;
-const TOOL_RESULT_COLLAPSE_CHARS = 800;
 const STORAGE_SESSIONS_KEY = 'pskit_agent_sessions_v1';
 const STORAGE_ACTIVE_SESSION_KEY = 'pskit_agent_active_session_v1';
 const NEW_SESSION_TITLE = 'New Chat';
@@ -117,7 +116,6 @@ const hydrateMessagesFromHistory = (history) => {
                         : JSON.stringify(fn?.arguments || {}),
                     status: 'done',
                     result: '',
-                    showFullResult: false,
                     files: []
                 };
             });
@@ -267,18 +265,21 @@ const formatFileSize = (size) => {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const isLongToolResult = (text) => {
-    return String(text || '').length > TOOL_RESULT_COLLAPSE_CHARS;
-};
-
-const getToolResultPreview = (text) => {
-    const raw = String(text || '');
-    if (raw.length <= TOOL_RESULT_COLLAPSE_CHARS) return raw;
-    return raw.slice(0, TOOL_RESULT_COLLAPSE_CHARS) + '\n...';
-};
-
-const toggleToolResultExpanded = (tool) => {
-    tool.showFullResult = !tool.showFullResult;
+const markPendingToolCallsStopped = (message = 'Stopped by user.') => {
+    let changed = false;
+    for (const msg of messages.value) {
+        if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.toolCalls)) continue;
+        for (const tool of msg.toolCalls) {
+            if (tool?.status === 'running' || tool?.status === 'waiting') {
+                tool.status = 'stopped';
+                tool.waitMessage = message;
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        scrollToBottom();
+    }
 };
 
 const fetchToolSessionFiles = async (toolCallId) => {
@@ -430,7 +431,6 @@ const sendMessage = async () => {
                             status: 'running',
                             waitMessage: '',
                             result: '',
-                            showFullResult: false,
                             files: []
                         });
                     }
@@ -453,9 +453,6 @@ const sendMessage = async () => {
                             currentCall.status = 'done';
                             currentCall.waitMessage = '';
                             currentCall.result = event.content;
-                            if (!isLongToolResult(currentCall.result)) {
-                                currentCall.showFullResult = true;
-                            }
 
                             void fetchToolSessionFiles(currentCall.id)
                                 .then((toolFiles) => {
@@ -509,6 +506,7 @@ const sendMessage = async () => {
     } catch (err) {
         if (err.name === 'AbortError') {
             console.log('Generation stopped by user');
+            markPendingToolCallsStopped();
         } else {
             console.error('Chat error:', err);
         }
@@ -518,6 +516,7 @@ const sendMessage = async () => {
 
 const stopGeneration = () => {
     if (abortController) {
+        markPendingToolCallsStopped();
         abortController.abort();
         abortController = null;
     }
@@ -588,7 +587,7 @@ const stopGeneration = () => {
                 <div v-for="(msg, index) in messages" :key="index" class="flex flex-col">
 
                     <div v-if="msg.role === 'user'"
-                        class="self-end max-w-[80%] bg-blue-600 text-white rounded-2xl rounded-tr-sm px-5 py-3 shadow-sm">
+                        class="message-bubble self-end max-w-[80%] bg-blue-600 text-white rounded-2xl rounded-tr-sm px-5 py-3 shadow-sm">
                         {{ msg.content }}
                     </div>
 
@@ -617,13 +616,17 @@ const stopGeneration = () => {
                                                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
                                             </path>
                                         </svg>
+                                        <svg v-else-if="tool.status === 'stopped'" class="h-4 w-4 text-rose-500"
+                                            fill="currentColor" viewBox="0 0 20 20">
+                                            <rect x="5" y="5" width="10" height="10" rx="2" ry="2"></rect>
+                                        </svg>
                                         <svg v-else class="h-4 w-4 text-green-500" fill="none" stroke="currentColor"
                                             viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                                 d="M5 13l4 4L19 7"></path>
                                         </svg>
                                         <span>Using tool: <span class="text-blue-600 font-mono">{{ tool.name
-                                                }}</span></span>
+                                        }}</span></span>
                                     </div>
                                     <div
                                         class="text-xs text-gray-500 font-mono bg-gray-200 dark:bg-gray-800 p-2 rounded mt-1 overflow-x-auto">
@@ -632,19 +635,17 @@ const stopGeneration = () => {
                                     <div v-if="tool.status === 'waiting'" class="text-xs text-amber-600 mt-1">
                                         {{ tool.waitMessage || 'Waiting for available worker slot...' }}
                                     </div>
+                                    <div v-else-if="tool.status === 'stopped'" class="text-xs text-rose-600 mt-1">
+                                        {{ tool.waitMessage || 'Stopped by user.' }}
+                                    </div>
                                     <div v-if="tool.result"
                                         class="mt-2 rounded bg-white/80 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-600 p-2">
                                         <div class="flex items-center justify-between mb-1">
                                             <div class="text-xs font-semibold text-gray-600 dark:text-gray-300">Tool
                                                 output</div>
-                                            <button v-if="isLongToolResult(tool.result)"
-                                                @click="toggleToolResultExpanded(tool)"
-                                                class="text-xs text-blue-600 hover:text-blue-700 hover:underline">
-                                                {{ tool.showFullResult ? 'Hide' : 'Show all' }}
-                                            </button>
                                         </div>
                                         <pre
-                                            class="text-xs text-gray-700 dark:text-gray-200 font-mono whitespace-pre-wrap break-words overflow-auto rounded bg-gray-100 dark:bg-gray-800 p-2 max-h-56">{{ tool.showFullResult ? tool.result : getToolResultPreview(tool.result) }}</pre>
+                                            class="text-xs text-gray-700 dark:text-gray-200 font-mono whitespace-pre-wrap break-words overflow-auto rounded bg-gray-100 dark:bg-gray-800 p-2 max-h-30">{{ tool.result }}</pre>
                                     </div>
                                     <div v-if="tool.files && tool.files.length > 0"
                                         class="mt-2 rounded bg-white/60 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-600 p-2">
@@ -663,7 +664,7 @@ const stopGeneration = () => {
                             </div>
 
                             <div v-if="msg.content"
-                                class="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm prose prose-sm max-w-none dark:prose-invert"
+                                class="message-bubble bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm prose prose-sm max-w-none dark:prose-invert"
                                 v-html="renderMarkdown(msg.content)">
                             </div>
 
@@ -709,9 +710,19 @@ const stopGeneration = () => {
 </template>
 
 <style scoped>
+.message-bubble {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
 .prose :where(p):not(:where([class~="not-prose"] *)) {
     margin-top: 0.5em;
     margin-bottom: 0.5em;
+}
+
+.message-bubble :deep(*) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .prose :where(pre):not(:where([class~="not-prose"] *)) {

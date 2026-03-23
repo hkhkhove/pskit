@@ -1,8 +1,49 @@
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
-use std::process::Command;
+use tokio::process::Command;
 use uuid::Uuid;
+
+fn validate_result_file_path(
+    home: &Path,
+    requested_path: &Path,
+) -> Result<std::path::PathBuf, String> {
+    let allowed_root = home.join("tasks").join("agent_sessions");
+    let allowed_root_canonical = allowed_root.canonicalize().map_err(|e| {
+        format!(
+            "Failed to resolve allowed root {}: {}",
+            allowed_root.display(),
+            e
+        )
+    })?;
+
+    let requested_canonical = requested_path
+        .canonicalize()
+        .map_err(|e| format!("Invalid file_path {}: {}", requested_path.display(), e))?;
+
+    if !requested_canonical.starts_with(&allowed_root_canonical) {
+        return Err(format!(
+            "Access denied: file_path must be under {}",
+            allowed_root_canonical.display()
+        ));
+    }
+
+    let metadata = std::fs::metadata(&requested_canonical).map_err(|e| {
+        format!(
+            "Failed to read file metadata {}: {}",
+            requested_canonical.display(),
+            e
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "Invalid file_path {}: expected a regular file",
+            requested_canonical.display()
+        ));
+    }
+
+    Ok(requested_canonical)
+}
 
 #[derive(Debug, Deserialize)]
 struct ToolCatalog {
@@ -80,10 +121,12 @@ pub fn get_tools() -> anyhow::Result<Vec<serde_json::Value>> {
     Ok(tools)
 }
 
-fn run_cli_tool(args: &[String]) -> Result<String, String> {
+async fn run_cli_tool(args: &[String]) -> Result<String, String> {
     let output = Command::new("pskit-cli")
         .args(args)
+        .kill_on_drop(true)
         .output()
+        .await
         .map_err(|e| format!("Failed to execute pskit-cli: {}", e))?;
 
     if output.status.success() {
@@ -224,7 +267,8 @@ pub async fn execute_tool(
                 format.to_string(),
                 "-o".to_string(),
                 output_dir.to_string_lossy().to_string(),
-            ])?;
+            ])
+            .await?;
             Ok(format!("{}\nOutput dir: {}", out, output_dir.display()))
         }
         "split_complex" => {
@@ -242,7 +286,8 @@ pub async fn execute_tool(
                 output_dir.to_string_lossy().to_string(),
                 "-F".to_string(),
                 format.to_string(),
-            ])?;
+            ])
+            .await?;
             Ok(format!("{}\nOutput dir: {}", out, output_dir.display()))
         }
         "extract_fragment" => {
@@ -278,7 +323,7 @@ pub async fn execute_tool(
                 cli_args.push("--end".to_string());
                 cli_args.push(end.to_string());
             }
-            let out = run_cli_tool(&cli_args)?;
+            let out = run_cli_tool(&cli_args).await?;
             Ok(format!("{}\nOutput file: {}", out, output_file.display()))
         }
         "calculate_contact_map" => {
@@ -313,7 +358,7 @@ pub async fn execute_tool(
                 cli_args.push("--k".to_string());
                 cli_args.push(k.to_string());
             }
-            let out = run_cli_tool(&cli_args)?;
+            let out = run_cli_tool(&cli_args).await?;
             Ok(format!("{}\nOutput file: {}", out, output_file.display()))
         }
         "annotate_binding_pairs" => {
@@ -339,7 +384,8 @@ pub async fn execute_tool(
                 output_file.to_string_lossy().to_string(),
                 "--cutoff".to_string(),
                 cutoff.to_string(),
-            ])?;
+            ])
+            .await?;
             Ok(format!("{}\nOutput file: {}", out, output_file.display()))
         }
         "predict_binding_sites" => {
@@ -356,7 +402,9 @@ pub async fn execute_tool(
                 .arg("--ligand_type")
                 .arg(ligand_type)
                 .current_dir(ai_root)
+                .kill_on_drop(true)
                 .output()
+                .await
                 .map_err(|e| format!("Failed to execute predict_binding_sites: {}", e))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -392,7 +440,9 @@ pub async fn execute_tool(
                 .arg("--rosetta_relax")
                 .arg(rosetta_relax)
                 .current_dir(ai_root)
+                .kill_on_drop(true)
                 .output()
+                .await
                 .map_err(|e| format!("Failed to execute extract_empirical_features: {}", e))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -415,21 +465,23 @@ pub async fn execute_tool(
             let protein = args["protein_seq"]
                 .as_str()
                 .ok_or("Missing protein_sequence")?;
-            let nucleic = args["nucleic_seq"]
+            let nucleic = args["nucleic_acid_seq"]
                 .as_str()
-                .ok_or("Missing nucleic_sequence")?;
+                .ok_or("Missing nucleic_acid_sequence")?;
             std::fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
             let output = Command::new("python")
                 .arg("-m")
                 .arg("ai.PAIR")
                 .arg("--protein_seq")
                 .arg(protein)
-                .arg("--nucleic_seq")
+                .arg("--nucleic_acid_seq")
                 .arg(nucleic)
                 .arg("--output_dir")
                 .arg(&output_dir)
                 .current_dir(ai_root)
+                .kill_on_drop(true)
                 .output()
+                .await
                 .map_err(|e| format!("Failed to execute predict_interaction: {}", e))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -466,7 +518,8 @@ pub async fn execute_tool(
                 .unwrap_or(12_000)
                 .clamp(200, 120_000);
 
-            read_result_file_preview(Path::new(file_path), start_line, max_lines, max_chars)
+            let safe_file_path = validate_result_file_path(&home, Path::new(file_path))?;
+            read_result_file_preview(&safe_file_path, start_line, max_lines, max_chars)
         }
         _ => Err(format!("Unknown tool: {}", name)),
     }

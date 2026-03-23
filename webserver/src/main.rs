@@ -357,7 +357,10 @@ async fn main() {
         .map(|arg| PathBuf::from(arg))
         .unwrap_or_else(|| PathBuf::from("./"));
 
-    let _ = from_path(home.join(".env"));
+    #[cfg(debug_assertions)]
+    {
+        let _ = from_path(home.join(".env"));
+    }
 
     let addr = env::args().nth(2).unwrap_or("127.0.0.1:10706".to_string());
 

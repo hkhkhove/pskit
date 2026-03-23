@@ -4,12 +4,15 @@ import os
 import sys
 import traceback
 import time
+import warnings
 
 from .config import path
 from .feature import empirical_feats, esm2, saprot
 from .utils import download_pdb
 from .INABe import main as pred_nbs
 from .PAIR import main as pred_pni
+
+warnings.filterwarnings("ignore")
 
 
 @dataclass

@@ -3,6 +3,7 @@ import pickle
 import os
 import traceback
 import shutil
+import warnings
 
 import torch
 
@@ -12,6 +13,7 @@ from .model.INAB import INAB
 from .utils import read_structure, is_protein_chain, has_protein_chain
 
 torch.set_grad_enabled(False)
+warnings.filterwarnings("ignore")
 
 
 def get_seq(pdb_file):

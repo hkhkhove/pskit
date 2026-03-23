@@ -1,5 +1,6 @@
 import os
 import traceback
+import warnings
 
 import torch
 import torch.nn as nn
@@ -7,6 +8,8 @@ import esm
 import fm
 
 from .config import path
+
+warnings.filterwarnings("ignore")
 
 
 class ContrastiveLearningModel(nn.Module):
@@ -98,14 +101,16 @@ def agent_run(protein_seq, nucleic_acid_seq, output_dir):
             output = model(rna_embbding, prot_embbding)
             output = torch.sigmoid(output)
 
-        with open(os.path.join(output_dir, "predictions.csv"), "w") as f:
+        with open(os.path.join(output_dir, "PNI_predictions.csv"), "w") as f:
             f.write("Protein,Nucleic Acid,Binding Score\n")
-            f.write(f"{protein_seq},{nucleic_acid_seq},{round(output[0][0].item(), 3)}\n")
+            protein_seq_display = protein_seq if len(protein_seq) <= 20 else protein_seq[:10] + "..." + protein_seq[-10:]
+            nucleic_acid_seq_display = nucleic_acid_seq if len(nucleic_acid_seq) <= 20 else nucleic_acid_seq[:10] + "..." + nucleic_acid_seq[-10:]
+            f.write(f"{protein_seq_display},{nucleic_acid_seq_display},{round(output[0][0].item(), 3)}\n")
 
     except Exception as e:
         return str(e) + "\n" + traceback.format_exc()
 
-    return f"result file: {os.path.join(output_dir, 'predictions.csv')}"
+    return f"result file: {os.path.join(output_dir, 'PNI_predictions.csv')}"
 
 
 def main(paris, input_dir, output_dir):
@@ -132,7 +137,7 @@ def main(paris, input_dir, output_dir):
             output = model(rna_embbdings, prot_embbdings)
             output = torch.sigmoid(output)
 
-        with open(os.path.join(output_dir, "predictions.csv"), "w") as f:
+        with open(os.path.join(output_dir, "PNI_predictions.csv"), "w") as f:
             f.write("Protein,Nucleic Acid,Binding Score\n")
             for i in range(len(paris)):
                 f.write(f"{prot_seqs[i]},{rna_seqs[i]},{round(output[i][i].item(), 3)}\n")
