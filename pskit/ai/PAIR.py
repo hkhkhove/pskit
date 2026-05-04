@@ -1,6 +1,7 @@
 import os
 import traceback
 import warnings
+from transformers.utils import logging
 
 import torch
 import torch.nn as nn
@@ -9,6 +10,7 @@ import fm
 
 from .config import path
 
+logging.set_verbosity_error()
 warnings.filterwarnings("ignore")
 
 

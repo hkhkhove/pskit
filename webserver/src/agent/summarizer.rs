@@ -16,16 +16,19 @@ pub async fn generate_session_title(
     model: &str,
     api_url: &str,
     api_key: &str,
+    prompt: &str,
     first_user_message: &str,
 ) -> Option<String> {
-    let prompt = "Generate a very short chat title (max 12 words) for the user's first message. Return only the title text, no quotes, no punctuation suffix.";
     let body = serde_json::json!({
         "model": model,
         "stream": false,
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": first_user_message}
-        ]
+        ],
+        "thinking":{
+            "type":"disabled"
+        }
     });
 
     let resp = client
@@ -57,6 +60,7 @@ pub async fn generate_history_summary(
     model: &str,
     api_url: &str,
     api_key: &str,
+    prompt: &str,
     history: &[serde_json::Value],
 ) -> Option<String> {
     let transcript = build_history_for_summary(history);
@@ -64,14 +68,16 @@ pub async fn generate_history_summary(
         return None;
     }
 
-    let prompt = "Summarize the conversation for long-context memory. Keep it concise and factual. Include: user goals, key decisions, important tool findings, unresolved questions, and constraints. Output plain text under 180 words.";
     let body = serde_json::json!({
         "model": model,
         "stream": false,
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": transcript}
-        ]
+        ],
+        "thinking": {
+            "type": "disabled"
+        }
     });
 
     let response = client

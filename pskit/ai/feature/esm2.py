@@ -4,11 +4,14 @@ import warnings
 import numpy as np
 import torch
 import esm
+from transformers.utils import logging
+
 
 from ..utils import read_structure, is_protein_chain
 
 warnings.filterwarnings("ignore")
 
+logging.set_verbosity_error()
 torch.set_grad_enabled(False)
 
 

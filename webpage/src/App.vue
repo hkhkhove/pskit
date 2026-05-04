@@ -64,12 +64,14 @@ const menus = [
                         </li>
                         <li v-for="menu in menus" :key="menu.name" class="relative" @mouseenter="activeMenu = menu.name"
                             @mouseleave="activeMenu = null">
-                            <button class="flex items-center space-x-2 hover:text-blue-700 dark:hover:text-blue-400">
+                            <button
+                                class="flex items-center space-x-2 transition hover:text-blue-700 dark:hover:text-blue-400">
                                 {{ menu.name }}
-                                <svg class="w-2.5 h-2.5 ms-2.5" xmlns="http://www.w3.org/2000/svg" fill="none"
-                                    viewBox="0 0 10 6">
-                                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"
-                                        stroke-width="2" d="m1 1 4 4 4-4" />
+                                <svg class="ms-1 h-4 w-4 transition-transform"
+                                    :class="activeMenu === menu.name ? 'rotate-180' : ''" fill="none"
+                                    stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 9l-7 7-7-7" />
                                 </svg>
                             </button>
                             <div v-show="activeMenu === menu.name"
@@ -79,7 +81,7 @@ const menus = [
                                     <ul class="block py-2 text-sm text-center">
                                         <li v-for="item in menu.items" :key="item.name">
                                             <router-link :to="item.path"
-                                                class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400 text-gray-700 dark:text-gray-400">{{
+                                                class="block px-4 py-2 text-gray-700 transition hover:text-blue-700 dark:text-gray-400 dark:hover:text-blue-300">{{
                                                     item.name }}</router-link>
                                         </li>
                                     </ul>
@@ -96,12 +98,14 @@ const menus = [
                                 class="hover:text-blue-700 dark:hover:text-blue-400">Viewer</router-link>
                         </li>
                         <li class="relative" @mouseenter="activeMenu = 'About'" @mouseleave="activeMenu = null">
-                            <button class="flex items-center space-x-2 hover:text-blue-700 dark:hover:text-blue-400">
+                            <button
+                                class="flex items-center space-x-2 transition hover:text-blue-700 dark:hover:text-blue-400">
                                 About
-                                <svg class="w-2.5 h-2.5 ms-2.5" xmlns="http://www.w3.org/2000/svg" fill="none"
-                                    viewBox="0 0 10 6">
-                                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"
-                                        stroke-width="2" d="m1 1 4 4 4-4" />
+                                <svg class="ms-1 h-4 w-4 transition-transform"
+                                    :class="activeMenu === 'About' ? 'rotate-180' : ''" fill="none"
+                                    stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 9l-7 7-7-7" />
                                 </svg>
                             </button>
                             <div v-show="activeMenu === 'About'"
@@ -111,7 +115,7 @@ const menus = [
                                     <ul class="block py-2 text-sm text-center text-gray-700 dark:text-gray-400">
                                         <li>
                                             <a href="https://github.com/hkhkhove/pskit"
-                                                class="flex items-center justify-center space-x-3 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-blue-400">
+                                                class="flex items-center justify-center space-x-3 px-4 py-2 transition hover:text-blue-700 dark:hover:text-blue-300">
                                                 <svg height="16" aria-hidden="true" viewBox="0 0 24 24" version="1.1"
                                                     width="16" data-view-component="true"
                                                     class="octicon octicon-mark-github v-align-middle">

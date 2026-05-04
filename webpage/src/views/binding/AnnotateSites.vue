@@ -410,22 +410,23 @@ watch(
             </div>
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
 
-            <div class="w-full h-[720px] relative rounded-lg border border-gray-200 dark:border-gray-700">
+            <div
+                class="w-full h-[720px] relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div ref="viewerContainer" class="w-full h-full relative"></div>
             </div>
-            <!-- Color Legend -->
-            <div v-if="current_result" class="mt-4 flex items-center justify-center gap-4 text-sm">
+            <div v-if="current_result"
+                class="mt-3 flex flex-wrap items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
                 <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded" style="background-color: rgb(52, 152, 219)"></div>
-                    <span class="text-gray-700 dark:text-gray-300">Binding AA</span>
+                    <div class="h-2.5 w-2.5 rounded-sm" style="background-color: rgb(52, 152, 219)"></div>
+                    <span>Binding AA</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded" style="background-color: rgb(231, 76, 60)"></div>
-                    <span class="text-gray-700 dark:text-gray-300">Binding NT</span>
+                    <div class="h-2.5 w-2.5 rounded-sm" style="background-color: rgb(231, 76, 60)"></div>
+                    <span>Binding NT</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded" style="background-color: rgb(255, 235, 59)"></div>
-                    <span class="text-gray-700 dark:text-gray-300">Selected</span>
+                    <div class="h-2.5 w-2.5 rounded-sm" style="background-color: rgb(255, 235, 59)"></div>
+                    <span>Selected</span>
                 </div>
             </div>
         </template>

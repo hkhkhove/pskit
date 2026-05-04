@@ -104,6 +104,10 @@ def combine(pdb_files, output_dir):
                 pickle.dump((prot_name, node_feats, coords, edges, edge_attr), f)
 
             success_combine.append(pdb_file)
+
+            os.remove(esm2_file)
+            os.remove(saprot_file)
+
         except Exception as e:
             error_combine[prot_name + ext] = f"Prepare feature failed due to {str(e)}"
 

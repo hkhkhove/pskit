@@ -57,7 +57,7 @@ RUN git clone https://github.com/PDB-REDO/dssp.git --depth 1
 WORKDIR /app/dssp
 
 RUN cmake -S . -B build
-RUN cmake --build build -j8
+RUN cmake --build build -j$(nproc)
 RUN cmake --install build
 
 WORKDIR /app

@@ -3,6 +3,7 @@ use pskit_core::annotate::compute_binding_pairs;
 use pskit_core::contact::d2_map;
 use pskit_core::split::extract_fragment;
 use pskit_core::split::split_complex;
+use pskit_core::utils::extract_sequences;
 
 #[cfg(test)]
 mod tests {
@@ -48,5 +49,15 @@ mod tests {
         let reader = BufReader::new(File::open(pdb_path).unwrap());
         let d2_map = d2_map(reader, Some("A".into()), "cif");
         println!("{:?}", d2_map);
+    }
+
+    #[test]
+    fn test_extract_sequences() {
+        use std::fs::File;
+        let pdb_path = "./test_pdbs/7U5E.cif";
+        let reader = BufReader::new(File::open(pdb_path).expect("open file"));
+        let sequences = extract_sequences(reader, "cif").expect("extract sequences");
+        assert!(!sequences.is_empty());
+        assert!(sequences.values().any(|seq| !seq.is_empty()));
     }
 }

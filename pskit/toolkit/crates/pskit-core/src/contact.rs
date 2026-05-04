@@ -98,11 +98,10 @@ pub fn d2_map<R: BufRead>(
 
     let n = axis.len();
 
-    for i in 0..n {
+    for i in 0..n - 1 {
         let d2 = d2_batch_wide(&x[i + 1..n], &y[i + 1..n], &z[i + 1..n], [x[i], y[i], z[i]]);
         values.push(d2);
     }
-
     Ok((axis, values))
 }
 
@@ -122,10 +121,10 @@ pub fn knn_map<R: BufRead>(
         let mut has_equal_v = false;
         for e in line {
             *e = if e < kth {
-                e.sqrt()
+                1.0
             } else if e == kth && !has_equal_v {
                 has_equal_v = true;
-                e.sqrt()
+                1.0
             } else {
                 0.0
             }
@@ -146,7 +145,7 @@ pub fn d_map<R: BufRead>(
 
     for line in values {
         for e in line {
-            *e = e.sqrt();
+            *e = (e.sqrt() * 1000.0).round() / 1000.0;
         }
     }
     let d_map = d2_map;

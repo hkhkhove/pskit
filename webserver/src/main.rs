@@ -30,6 +30,7 @@ struct AppState {
     db_pool: SqlitePool,
     task_sender: tokio::sync::mpsc::UnboundedSender<String>,
     task_queue: Arc<Mutex<std::collections::VecDeque<String>>>,
+    agent_session_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 // API处理函数
@@ -398,6 +399,7 @@ async fn main() {
         db_pool: db_pool.clone(),
         task_sender,
         task_queue: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+        agent_session_locks: Arc::new(Mutex::new(HashMap::new())),
     };
 
     //创建并启动任务调度器

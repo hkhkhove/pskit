@@ -1,4 +1,5 @@
 use pdbtbx::{Format, PDBError, PDB};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, BufWriter};
 
 pub fn three_to_one(three: &str) -> char {
@@ -25,6 +26,17 @@ pub fn three_to_one(three: &str) -> char {
         "VAL" => 'V',
         "UNK" => 'X',
         _ => 'X',
+    }
+}
+
+pub fn nucleic_to_one(name: &str) -> char {
+    match name {
+        "A" | "DA" => 'A',
+        "C" | "DC" => 'C',
+        "G" | "DG" => 'G',
+        "U" => 'U',
+        "T" | "DT" => 'T',
+        _ => 'N',
     }
 }
 
@@ -63,6 +75,36 @@ pub fn read_raw<R: BufRead>(reader: R, format: &str) -> Result<(PDB, Vec<PDBErro
         })?;
 
     Ok((pdb, errors))
+}
+
+pub fn extract_sequences<R: BufRead>(
+    reader: R,
+    format: &str,
+) -> Result<BTreeMap<String, String>, String> {
+    let (pdb, _errors) = read_raw(reader, format)?;
+    let mut sequences = BTreeMap::new();
+
+    for chain in pdb.chains() {
+        let mut sequence = String::new();
+
+        for residue in chain.residues() {
+            let Some(name) = residue.name() else {
+                continue;
+            };
+
+            if is_protein_residue(name) {
+                sequence.push(three_to_one(name));
+            } else if is_nucleic_residue(name) {
+                sequence.push(nucleic_to_one(name));
+            }
+        }
+
+        if !sequence.is_empty() {
+            sequences.insert(chain.id().to_string(), sequence);
+        }
+    }
+
+    Ok(sequences)
 }
 
 pub fn write_raw(pdb: PDB, format: &str) -> Vec<u8> {

@@ -21,6 +21,7 @@ docker run -d \
   -p 127.0.0.1:10706:10706 \
   -v <model_parameters_dir>:/app/pskit/ai/model_parameters \
   -v <tasks_dir>:/app/tasks \
+  -e API_KEY=XXX
   pskit
 ```
 

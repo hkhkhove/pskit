@@ -164,7 +164,13 @@ def agent_run(pdb_path, output_dir, emp_feats, rosetta_relax):
     if "dssp" in emp_feats:
         dssp_file = os.path.join(output_dir, stem + ".dssp")
         cmd = [mypath["dssp"], "--output-format", "dssp", pdb_path, dssp_file]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
         if result.returncode != 0:
             return f"{pdb_path}: DSSP failed, {result.stderr}"
         res += dssp_file + "; "

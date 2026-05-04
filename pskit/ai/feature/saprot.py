@@ -6,10 +6,14 @@ import torch
 import json
 
 from transformers import EsmTokenizer, EsmForMaskedLM
+from transformers.utils import logging
+
 
 from ..utils import is_protein_chain, read_structure
 
 warnings.filterwarnings("ignore")
+logging.set_verbosity_error()
+
 
 torch.set_grad_enabled(False)
 

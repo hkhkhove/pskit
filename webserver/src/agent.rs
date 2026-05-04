@@ -6,8 +6,11 @@ use axum::{
 };
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::convert::Infallible;
+use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::TryAcquireError;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -16,23 +19,21 @@ use uuid::Uuid;
 use crate::AppState;
 
 mod context;
-mod skills;
 mod store;
 mod summarizer;
 mod tools;
 mod utils;
 
-use self::skills::{
-    Skill, allowed_tool_set, default_skill, load_skills, render_skill_prompt, select_skill_with_llm,
-};
 use self::tools::{execute_tool, get_tools};
 
 use self::context::{
     SUMMARY_MARKER, build_context_history, count_user_turns, get_content, get_role,
+    validate_message_sequence,
 };
 use self::store::{
     build_session_dir, delete_session, download_session_tool_file, get_session_history,
-    history_file, list_session_files, read_history, write_history,
+    history_file, is_valid_session_id, list_session_files, read_history, ui_history_file,
+    upload_session_files, write_history,
 };
 use self::summarizer::{generate_history_summary, generate_session_title};
 use self::utils::{parse_tool_args, truncate_text};
@@ -46,7 +47,6 @@ struct ModelConfig {
 #[derive(Debug, Deserialize)]
 struct AgentConfig {
     chat: ModelConfig,
-    skill_selection: ModelConfig,
     summary: ModelConfig,
 
     max_agent_steps: usize,
@@ -68,6 +68,8 @@ struct ToolCallAcc {
 pub struct ChatRequest {
     pub message: String,
     pub session_id: Option<String>,
+    pub display_message: Option<String>,
+    pub uploaded_files: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Serialize)]
@@ -117,6 +119,80 @@ fn needs_cpu_semaphore(tool_name: &str) -> bool {
     matches!(tool_name, "predict_binding_sites" | "predict_interaction")
 }
 
+fn tool_name_set(tools: &[serde_json::Value]) -> HashSet<String> {
+    tools
+        .iter()
+        .filter_map(|tool| {
+            tool.get("function")
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect()
+}
+
+fn make_ui_tool_call(id: &str, name: &str, args: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "name": name,
+        "args": args,
+        "status": "running",
+        "waitMessage": "",
+        "result": "",
+        "files": [],
+        "expanded": false,
+    })
+}
+
+fn history_without_system_prompt(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    if messages.len() > 1 {
+        messages[1..].to_vec()
+    } else {
+        messages.to_vec()
+    }
+}
+
+async fn persist_agent_history_snapshot(history_file: &Path, messages: &[serde_json::Value]) {
+    let history_to_save = history_without_system_prompt(messages);
+    if let Err(err) = write_history(history_file, &history_to_save).await {
+        debug_log(&format!("Failed to write agent history snapshot: {}", err));
+    }
+}
+
+async fn persist_agent_ui_snapshot(
+    ui_history_file: &Path,
+    base_ui_history: &[serde_json::Value],
+    display_message: &str,
+    uploaded_files: &[serde_json::Value],
+    ui_assistant_content: &str,
+    ui_tool_calls: &[serde_json::Value],
+) {
+    let mut ui_history = base_ui_history.to_vec();
+    let mut ui_user_message = serde_json::json!({
+        "role": "user",
+        "content": display_message,
+    });
+    if !uploaded_files.is_empty() {
+        ui_user_message["files"] = serde_json::Value::Array(uploaded_files.to_vec());
+    }
+    ui_history.push(ui_user_message);
+
+    if !ui_assistant_content.is_empty() || !ui_tool_calls.is_empty() {
+        ui_history.push(serde_json::json!({
+            "role": "assistant",
+            "content": ui_assistant_content,
+            "toolCalls": ui_tool_calls,
+        }));
+    }
+
+    if let Err(err) = write_history(ui_history_file, &ui_history).await {
+        debug_log(&format!(
+            "Failed to write agent UI history snapshot: {}",
+            err
+        ));
+    }
+}
+
 fn load_agent_config() -> anyhow::Result<AgentConfig> {
     let config_path = crate::config::Config::home()
         .join("agent_config")
@@ -128,20 +204,23 @@ fn load_agent_config() -> anyhow::Result<AgentConfig> {
     Ok(config)
 }
 
-fn load_system_prompt() -> anyhow::Result<String> {
+fn load_agent_prompt(filename: &str, label: &str) -> anyhow::Result<String> {
     let config_path = crate::config::Config::home()
         .join("agent_config")
-        .join("system_prompt.txt");
-    let system_prompt = std::fs::read_to_string(&config_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read system prompt: {}", e))?;
-    Ok(system_prompt)
+        .join(filename);
+    let prompt = std::fs::read_to_string(&config_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", label, e))?;
+    Ok(prompt)
 }
 
 pub fn agent_routes() -> Router<AppState> {
     Router::new()
         .route("/", post(chat_handler))
         .route("/sessions/{session_id}", delete(delete_session))
-        .route("/sessions/{session_id}/files", get(list_session_files))
+        .route(
+            "/sessions/{session_id}/files",
+            get(list_session_files).post(upload_session_files),
+        )
         .route("/sessions/{session_id}/history", get(get_session_history))
         .route(
             "/sessions/{session_id}/{tool_call_id}/{filename}",
@@ -155,13 +234,39 @@ async fn chat_handler(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (tx, rx) = mpsc::unbounded_channel();
     let session_id = req.session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    if !is_valid_session_id(&session_id) {
+        let _ = tx.send(Ok(Event::default()
+            .json_data(AgentEvent::Error {
+                message: "Invalid session_id".to_string(),
+            })
+            .unwrap()));
+        let _ = tx.send(Ok(Event::default().json_data(AgentEvent::Done).unwrap()));
+        let stream = UnboundedReceiverStream::new(rx);
+        return Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new());
+    }
+
+    let session_lock = {
+        let mut locks = state.agent_session_locks.lock().await;
+        locks
+            .entry(session_id.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
     //只是引用计数加一，指向的还是同一信号量
     let cpu_task_semaphore = state.cpu_task_semaphore.clone();
 
     let worker_tx = tx.clone();
     let worker = tokio::spawn(async move {
+        let _session_guard = session_lock.lock().await;
+        let display_message = req
+            .display_message
+            .clone()
+            .unwrap_or_else(|| req.message.clone());
+        let uploaded_files = req.uploaded_files.unwrap_or_default();
         if let Err(e) = run_agent_loop(
             req.message,
+            display_message,
+            uploaded_files,
             session_id,
             cpu_task_semaphore,
             worker_tx.clone(),
@@ -190,64 +295,30 @@ async fn chat_handler(
 
 async fn run_agent_loop(
     user_message: String,
+    display_message: String,
+    uploaded_files: Vec<serde_json::Value>,
     session_id: String,
     cpu_task_semaphore: Arc<tokio::sync::Semaphore>,
     tx: mpsc::UnboundedSender<Result<Event, Infallible>>,
 ) -> anyhow::Result<()> {
-    let api_key = std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| "".to_string());
+    let api_key = std::env::var("API_KEY").unwrap_or_else(|_| "".to_string());
     if api_key.is_empty() {
-        return Err(anyhow::anyhow!(
-            "GEMINI_API_KEY environment variable is not set."
-        ));
+        return Err(anyhow::anyhow!("API_KEY environment variable is not set."));
     }
 
     let agent_config = load_agent_config()?;
 
-    let client = reqwest::Client::new();
-
-    let skills = load_skills()?;
-    let selected_skill_id = select_skill_with_llm(
-        &client,
-        &agent_config.skill_selection.model,
-        &agent_config.skill_selection.api,
-        &api_key,
-        &user_message,
-        &skills,
-    )
-    .await
-    .ok()
-    .flatten();
-    let selected_skill: Skill = if let Some(skill_id) = selected_skill_id {
-        skills
-            .iter()
-            .find(|s| s.id == skill_id)
-            .cloned()
-            .or_else(|| default_skill(&skills))
-            .ok_or_else(|| anyhow::anyhow!("No skills configured"))?
-    } else {
-        debug_log("LLM did not select a skill, using default.");
-        default_skill(&skills).ok_or_else(|| anyhow::anyhow!("No skills configured"))?
-    };
-    let allowed_tools = allowed_tool_set(&selected_skill);
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(600))
+        .build()?;
 
     let home = crate::config::Config::home();
     let session_dir = build_session_dir(&home, &session_id);
     tokio::fs::create_dir_all(&session_dir).await?;
 
     let history_file = history_file(&session_dir);
-
-    let system_prompt = load_system_prompt()?;
-
-    let mut messages = vec![
-        serde_json::json!({
-            "role": "system",
-            "content": system_prompt,
-        }),
-        serde_json::json!({
-            "role": "system",
-            "content": render_skill_prompt(&selected_skill),
-        }),
-    ];
+    let ui_history_file = ui_history_file(&session_dir);
 
     let mut has_prior_history = false;
     let mut stored_history: Vec<serde_json::Value> = Vec::new();
@@ -255,6 +326,15 @@ async fn run_agent_loop(
         has_prior_history = !history.is_empty();
         stored_history.append(&mut history);
     }
+
+    let system_prompt = load_agent_prompt("system_prompt.txt", "system prompt")?;
+    let title_prompt = load_agent_prompt("title_prompt.txt", "title prompt")?;
+    let summary_prompt = load_agent_prompt("summary_prompt.txt", "summary prompt")?;
+
+    let mut messages = vec![serde_json::json!({
+        "role": "system",
+        "content": system_prompt,
+    })];
 
     let mut context_history =
         build_context_history(&stored_history, agent_config.recent_user_turns_window);
@@ -264,44 +344,64 @@ async fn run_agent_loop(
         "role": "user",
         "content": user_message,
     }));
-    //新对话，没有历史记录，生成标题
-    if !has_prior_history {
-        if let Some(title) = generate_session_title(
-            &client,
-            &agent_config.summary.model,
-            &agent_config.summary.api,
-            &api_key,
-            &user_message,
-        )
-        .await
-        {
-            let _ = tx.send(Ok(Event::default()
-                .json_data(AgentEvent::SessionTitle {
-                    session_id: session_id.clone(),
-                    title,
-                })
-                .unwrap()));
-        } else {
-            debug_log("Failed to generate session title.");
-        }
-    }
+
+    let base_ui_history = read_history(&ui_history_file).await.unwrap_or_default();
+
+    // 新对话异步生成标题，不阻塞主回答生成
+    let title_task = if !has_prior_history {
+        let title_client = client.clone();
+        let title_model = agent_config.summary.model.clone();
+        let title_api = agent_config.summary.api.clone();
+        let title_api_key = api_key.clone();
+        let title_prompt = title_prompt.clone();
+        let title_user_message = user_message.clone();
+        let title_session_id = session_id.clone();
+        let title_tx = tx.clone();
+
+        Some(tokio::spawn(async move {
+            if let Some(title) = generate_session_title(
+                &title_client,
+                &title_model,
+                &title_api,
+                &title_api_key,
+                &title_prompt,
+                &title_user_message,
+            )
+            .await
+            {
+                let _ = title_tx.send(Ok(Event::default()
+                    .json_data(AgentEvent::SessionTitle {
+                        session_id: title_session_id,
+                        title,
+                    })
+                    .unwrap()));
+            } else {
+                debug_log("Failed to generate session title.");
+            }
+        }))
+    } else {
+        None
+    };
 
     let tools = get_tools()?;
-    //只允许使用选中skill中允许的工具
-    let filtered_tools: Vec<serde_json::Value> = tools
-        .into_iter()
-        .filter(|tool| {
-            let name = tool
-                .get("function")
-                .and_then(|v| v.get("name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            allowed_tools.contains(name)
-        })
-        .collect();
+    let allowed_tool_names = tool_name_set(&tools);
     let mut agent_steps = 0usize;
     let mut total_tool_calls = 0usize;
     let tools_enabled = true;
+    let mut ui_assistant_content = String::new();
+    let mut ui_tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut unsaved_ui_chars = 0usize;
+
+    persist_agent_history_snapshot(&history_file, &messages).await;
+    persist_agent_ui_snapshot(
+        &ui_history_file,
+        &base_ui_history,
+        &display_message,
+        &uploaded_files,
+        &ui_assistant_content,
+        &ui_tool_calls,
+    )
+    .await;
 
     loop {
         agent_steps += 1;
@@ -319,13 +419,16 @@ async fn run_agent_loop(
             break;
         }
         //启用Stream
+        validate_message_sequence(&messages)
+            .map_err(|e| anyhow::anyhow!("Invalid message sequence before LLM request: {}", e))?;
+
         let mut request_body = serde_json::json!({
             "model": &agent_config.chat.model,
             "messages": messages,
             "stream": true,
         });
-        if tools_enabled {
-            request_body["tools"] = serde_json::Value::Array(filtered_tools.clone());
+        if tools_enabled && !tools.is_empty() {
+            request_body["tools"] = serde_json::Value::Array(tools.clone());
         }
 
         if debug_enabled() {
@@ -340,8 +443,8 @@ async fn run_agent_loop(
                 .map(|v| v.len())
                 .unwrap_or(0);
             debug_log(&format!(
-                "Sending request: model={}, stream=true, skill={}, messages={}, tools={}, tools_enabled={}",
-                agent_config.chat.model, selected_skill.id, msg_count, tool_count, tools_enabled
+                "Sending request: model={}, stream=true, messages={}, tools={}, tools_enabled={}",
+                agent_config.chat.model, msg_count, tool_count, tools_enabled
             ));
         }
         //LLM响应头
@@ -357,10 +460,11 @@ async fn run_agent_loop(
         let status = response.status();
         if !status.is_success() {
             let raw_text = response.text().await?;
-            return Err(anyhow::anyhow!("Gemini API error {}: {}", status, raw_text));
+            return Err(anyhow::anyhow!("LLM API error {}: {}", status, raw_text));
         }
 
         let mut assistant_content = String::new();
+        let mut reasoning_content = String::new();
         let mut calls: Vec<ToolCallAcc> = Vec::new();
 
         let mut buffer = String::new();
@@ -390,6 +494,9 @@ async fn run_agent_loop(
                 }
 
                 let data_payload = data_lines.join("\n");
+                if data_payload == "[DONE]" {
+                    continue;
+                }
 
                 //把一个事件中多行data:内容合并成一个完整的JSON块，进行解析
                 let chunk: serde_json::Value = match serde_json::from_str(&data_payload) {
@@ -412,29 +519,60 @@ async fn run_agent_loop(
 
                     if let Some(content_part) = delta.get("content").and_then(|v| v.as_str()) {
                         assistant_content.push_str(content_part);
+                        ui_assistant_content.push_str(content_part);
+                        unsaved_ui_chars += content_part.len();
                         let _ = tx.send(Ok(Event::default()
                             .json_data(AgentEvent::Text {
                                 content: content_part.to_string(),
                             })
                             .unwrap()));
+                        if unsaved_ui_chars >= 1024 {
+                            persist_agent_ui_snapshot(
+                                &ui_history_file,
+                                &base_ui_history,
+                                &display_message,
+                                &uploaded_files,
+                                &ui_assistant_content,
+                                &ui_tool_calls,
+                            )
+                            .await;
+                            unsaved_ui_chars = 0;
+                        }
+                    }
+                    if let Some(reasoning_part) =
+                        delta.get("reasoning_content").and_then(|v| v.as_str())
+                    {
+                        reasoning_content.push_str(reasoning_part);
                     }
                     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                         for tc in tool_calls.iter() {
-                            calls.push(ToolCallAcc::default());
-                            let idx = calls.len() - 1;
+                            let idx = tc
+                                .get("index")
+                                .and_then(|v| v.as_u64())
+                                .map(|v| v as usize)
+                                .unwrap_or(calls.len());
+
+                            while calls.len() <= idx {
+                                calls.push(ToolCallAcc::default());
+                            }
 
                             if let Some(id) = tc.get("id") {
-                                calls[idx].id = id.as_str().unwrap_or_default().to_string();
+                                let id_part = id.as_str().unwrap_or_default();
+                                if !id_part.is_empty() {
+                                    calls[idx].id = id_part.to_string();
+                                }
                             }
 
                             if let Some(func) = tc.get("function") {
                                 if let Some(name_part) = func.get("name") {
-                                    calls[idx].name =
-                                        name_part.as_str().unwrap_or_default().to_string();
+                                    calls[idx]
+                                        .name
+                                        .push_str(name_part.as_str().unwrap_or_default());
                                 }
                                 if let Some(args_part) = func.get("arguments") {
-                                    calls[idx].arguments =
-                                        args_part.as_str().unwrap_or_default().to_string();
+                                    calls[idx]
+                                        .arguments
+                                        .push_str(args_part.as_str().unwrap_or_default());
                                 }
                             }
 
@@ -473,9 +611,24 @@ async fn run_agent_loop(
             tool_calls.push(tc);
         }
 
-        let mut message = serde_json::json!({ "role": "assistant" });
-        if !assistant_content.is_empty() {
-            message["content"] = serde_json::Value::String(assistant_content);
+        let mut message = serde_json::json!({
+            "role": "assistant",
+            "content": assistant_content,
+        });
+        if !reasoning_content.is_empty() {
+            message["reasoning_content"] = serde_json::Value::String(reasoning_content);
+        }
+        if unsaved_ui_chars > 0 {
+            persist_agent_ui_snapshot(
+                &ui_history_file,
+                &base_ui_history,
+                &display_message,
+                &uploaded_files,
+                &ui_assistant_content,
+                &ui_tool_calls,
+            )
+            .await;
+            unsaved_ui_chars = 0;
         }
 
         if !tool_calls.is_empty() {
@@ -490,6 +643,7 @@ async fn run_agent_loop(
             }
 
             messages.push(message.clone());
+            persist_agent_history_snapshot(&history_file, &messages).await;
 
             for tool_call in tool_calls {
                 if total_tool_calls >= agent_config.max_tool_calls {
@@ -522,12 +676,20 @@ async fn run_agent_loop(
                     .and_then(|v| v.as_str())
                     .unwrap_or("{}")
                     .to_string();
+                let ui_tool_idx = ui_tool_calls.len();
+                ui_tool_calls.push(make_ui_tool_call(&tool_id, &name, &args_str));
+                persist_agent_ui_snapshot(
+                    &ui_history_file,
+                    &base_ui_history,
+                    &display_message,
+                    &uploaded_files,
+                    &ui_assistant_content,
+                    &ui_tool_calls,
+                )
+                .await;
 
-                if !allowed_tools.contains(name.as_str()) {
-                    let skip_msg = format!(
-                        "Tool '{}' is not allowed for active skill '{}'",
-                        name, selected_skill.id
-                    );
+                if !allowed_tool_names.contains(name.as_str()) {
+                    let skip_msg = format!("Tool '{}' is not defined in the tool catalog", name);
                     let _ = tx.send(Ok(Event::default()
                         .json_data(AgentEvent::ToolResult {
                             tool_call_id: tool_id.clone(),
@@ -540,6 +702,19 @@ async fn run_agent_loop(
                         "tool_call_id": tool_id,
                         "content": skip_msg,
                     }));
+                    ui_tool_calls[ui_tool_idx]["status"] =
+                        serde_json::Value::String("done".to_string());
+                    ui_tool_calls[ui_tool_idx]["result"] = serde_json::Value::String(skip_msg);
+                    persist_agent_history_snapshot(&history_file, &messages).await;
+                    persist_agent_ui_snapshot(
+                        &ui_history_file,
+                        &base_ui_history,
+                        &display_message,
+                        &uploaded_files,
+                        &ui_assistant_content,
+                        &ui_tool_calls,
+                    )
+                    .await;
                     continue;
                 }
 
@@ -576,6 +751,19 @@ async fn run_agent_loop(
                             "tool_call_id": tool_id,
                             "content": err_msg,
                         }));
+                        ui_tool_calls[ui_tool_idx]["status"] =
+                            serde_json::Value::String("done".to_string());
+                        ui_tool_calls[ui_tool_idx]["result"] = serde_json::Value::String(err_msg);
+                        persist_agent_history_snapshot(&history_file, &messages).await;
+                        persist_agent_ui_snapshot(
+                            &ui_history_file,
+                            &base_ui_history,
+                            &display_message,
+                            &uploaded_files,
+                            &ui_assistant_content,
+                            &ui_tool_calls,
+                        )
+                        .await;
                         continue;
                     }
                 };
@@ -595,6 +783,19 @@ async fn run_agent_loop(
                         "tool_call_id": tool_id,
                         "content": err_msg,
                     }));
+                    ui_tool_calls[ui_tool_idx]["status"] =
+                        serde_json::Value::String("done".to_string());
+                    ui_tool_calls[ui_tool_idx]["result"] = serde_json::Value::String(err_msg);
+                    persist_agent_history_snapshot(&history_file, &messages).await;
+                    persist_agent_ui_snapshot(
+                        &ui_history_file,
+                        &base_ui_history,
+                        &display_message,
+                        &uploaded_files,
+                        &ui_assistant_content,
+                        &ui_tool_calls,
+                    )
+                    .await;
                     continue;
                 }
 
@@ -603,6 +804,19 @@ async fn run_agent_loop(
                     let semaphore = cpu_task_semaphore.clone();
                     match semaphore.clone().try_acquire_owned() {
                         Ok(permit) => {
+                            ui_tool_calls[ui_tool_idx]["status"] =
+                                serde_json::Value::String("running".to_string());
+                            ui_tool_calls[ui_tool_idx]["waitMessage"] =
+                                serde_json::Value::String(String::new());
+                            persist_agent_ui_snapshot(
+                                &ui_history_file,
+                                &base_ui_history,
+                                &display_message,
+                                &uploaded_files,
+                                &ui_assistant_content,
+                                &ui_tool_calls,
+                            )
+                            .await;
                             let _ = tx.send(Ok(Event::default()
                                 .json_data(AgentEvent::ToolStatus {
                                     tool_call_id: tool_id.clone(),
@@ -619,6 +833,20 @@ async fn run_agent_loop(
                             res
                         }
                         Err(TryAcquireError::NoPermits) => {
+                            ui_tool_calls[ui_tool_idx]["status"] =
+                                serde_json::Value::String("waiting".to_string());
+                            ui_tool_calls[ui_tool_idx]["waitMessage"] = serde_json::Value::String(
+                                "Tool is waiting for an available worker slot...".to_string(),
+                            );
+                            persist_agent_ui_snapshot(
+                                &ui_history_file,
+                                &base_ui_history,
+                                &display_message,
+                                &uploaded_files,
+                                &ui_assistant_content,
+                                &ui_tool_calls,
+                            )
+                            .await;
                             let _ = tx.send(Ok(Event::default()
                                 .json_data(AgentEvent::ToolStatus {
                                     tool_call_id: tool_id.clone(),
@@ -632,6 +860,19 @@ async fn run_agent_loop(
 
                             match semaphore.acquire_owned().await {
                                 Ok(permit) => {
+                                    ui_tool_calls[ui_tool_idx]["status"] =
+                                        serde_json::Value::String("running".to_string());
+                                    ui_tool_calls[ui_tool_idx]["waitMessage"] =
+                                        serde_json::Value::String(String::new());
+                                    persist_agent_ui_snapshot(
+                                        &ui_history_file,
+                                        &base_ui_history,
+                                        &display_message,
+                                        &uploaded_files,
+                                        &ui_assistant_content,
+                                        &ui_tool_calls,
+                                    )
+                                    .await;
                                     let _ = tx.send(Ok(Event::default()
                                         .json_data(AgentEvent::ToolStatus {
                                             tool_call_id: tool_id.clone(),
@@ -686,16 +927,39 @@ async fn run_agent_loop(
                     "tool_call_id": tool_id,
                     "content": clipped_result,
                 }));
+                ui_tool_calls[ui_tool_idx]["status"] =
+                    serde_json::Value::String("done".to_string());
+                ui_tool_calls[ui_tool_idx]["result"] = serde_json::Value::String(clipped_result);
+                persist_agent_history_snapshot(&history_file, &messages).await;
+                persist_agent_ui_snapshot(
+                    &ui_history_file,
+                    &base_ui_history,
+                    &display_message,
+                    &uploaded_files,
+                    &ui_assistant_content,
+                    &ui_tool_calls,
+                )
+                .await;
             }
         } else {
             debug_log("No tool calls in this step; finishing loop.");
             messages.push(message);
+            persist_agent_history_snapshot(&history_file, &messages).await;
+            persist_agent_ui_snapshot(
+                &ui_history_file,
+                &base_ui_history,
+                &display_message,
+                &uploaded_files,
+                &ui_assistant_content,
+                &ui_tool_calls,
+            )
+            .await;
             break;
         }
     }
 
-    let mut history_to_save = if messages.len() > 2 {
-        messages[2..].to_vec() //历史记录不保存第一条系统提示和第二天skill提示，因为系统提示是固定的，而skill提示每次用户发消息都可能变化
+    let mut history_to_save = if messages.len() > 1 {
+        messages[1..].to_vec() //历史记录不保存系统提示，因为系统提示是固定的。
     } else {
         messages.clone()
     };
@@ -708,6 +972,7 @@ async fn run_agent_loop(
             &agent_config.summary.model,
             &agent_config.summary.api,
             &api_key,
+            &summary_prompt,
             &history_to_save,
         )
         .await
@@ -728,7 +993,28 @@ async fn run_agent_loop(
         );
     }
 
-    let _ = write_history(&history_file, &history_to_save).await;
+    if let Err(err) = write_history(&history_file, &history_to_save).await {
+        debug_log(&format!("Failed to write agent history: {}", err));
+        let _ = tx.send(Ok(Event::default()
+            .json_data(AgentEvent::Error {
+                message: format!("Failed to save chat history: {}", err),
+            })
+            .unwrap()));
+    }
+
+    persist_agent_ui_snapshot(
+        &ui_history_file,
+        &base_ui_history,
+        &display_message,
+        &uploaded_files,
+        &ui_assistant_content,
+        &ui_tool_calls,
+    )
+    .await;
+
+    if let Some(title_task) = title_task {
+        let _ = title_task.await;
+    }
 
     Ok(())
 }

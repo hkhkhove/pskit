@@ -1,199 +1,283 @@
 [[tools]]
 name = "search_pdb"
-description = "Search the RCSB PDB for protein/nucleic acid structures using natural language keywords."
+description = """
+Search RCSB PDB by natural-language keywords when the user does not provide a specific PDB ID.
+Use this for discovery questions such as finding relevant protein-nucleic-acid complexes or entries by protein name, organism, ligand, or function.
+Do not use this when the user already provides a 4-character PDB ID; use download_pdb_file or fetch_pdb_info instead.
+Returns up to 10 candidate PDB IDs, not structure files.
+"""
 [tools.parameters]
 type = "object"
 required = ["query"]
 [tools.parameters.properties.query]
 type = "string"
-description = "Keywords to search for, e.g., 'human p53 DNA complex'"
+description = "Concise RCSB search keywords, e.g. 'human p53 DNA complex' or 'RNA binding protein ribosome'."
 
 [[tools]]
 name = "download_pdb_file"
-description = "Download a structure file from RCSB by PDB ID and save it into the current agent session."
+description = """
+Download a PDB/mmCIF structure file from RCSB into the current agent session.
+Use this first whenever a downstream structure tool needs a pdb_path and the user provides a PDB ID.
+Prefer format='cif' unless the user explicitly asks for PDB format or a downstream tool needs PDB.
+The returned 'Saved to:' path is the only path that should be passed to structure-processing tools.
+If the same structure was already downloaded in this session history, reuse the existing saved path instead of downloading again.
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_id"]
 [tools.parameters.properties.pdb_id]
 type = "string"
-description = "4-character PDB ID, e.g., '8W2S'"
+description = "4-character PDB ID, e.g. '8W2S'. Normalize user input to uppercase."
 [tools.parameters.properties.format]
 type = "string"
 enum = ["cif", "pdb"]
-description = "File format to download. Defaults to cif."
+description = "File format to download. Default: cif. Use pdb only when requested or required."
 
 [[tools]]
 name = "fetch_pdb_info"
-description = "Get metadata for a specific PDB ID (resolution, species, chain entities, etc.)."
+description = """
+Fetch RCSB metadata for a specific PDB ID, including entry metadata and polymer/entity information.
+Use this when the user asks for structure information, chain/entity identity, organism, resolution, or when you need to inspect whether an entry is a protein-nucleic-acid complex before choosing a processing step.
+This does not download a coordinate file and does not produce a pdb_path.
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_id"]
 [tools.parameters.properties.pdb_id]
 type = "string"
-description = "4-character PDB ID, e.g., '1TUP'"
+description = "4-character PDB ID, e.g. '1TUP'. Normalize user input to uppercase."
 
 [[tools]]
 name = "split_pdb_by_chain"
 description = """
-Split a PDB/mmCIF file into separate chain files.\
-If user only wants extract specific chains, use extract_fragment instead.\
+Split a downloaded PDB/mmCIF structure into one file per chain.
+Input pdb_path must be a file saved inside the current agent session, usually from download_pdb_file or another tool output.
+Use this when the user wants all chains separated, or when you need to inspect/create per-chain files for later processing.
+If the user requests one specific chain, prefer extract_fragment because it directly extracts that chain.
+For predict_binding_sites, use this or extract_fragment first if the downloaded structure contains multiple chains; predict_binding_sites expects a single protein chain file.
 """
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "format"]
 [tools.parameters.properties.pdb_path]
 type = "string"
+description = "Absolute path to a session-local structure file returned by download_pdb_file or another structure tool."
 [tools.parameters.properties.format]
 type = "string"
 enum = ["cif", "pdb"]
-description = "File format of the input structure, pdb or cif."
+description = "Format of the input structure file. Match the file extension/path you pass."
 
 [[tools]]
 name = "split_complex"
-description = "Split PDB/mmCIF file into separate parts by molecule type (protein/nucleic acid)."
+description = """
+Split a downloaded protein-nucleic-acid complex by molecule type, separating protein and nucleic-acid components.
+Use only when the input is a protein-nucleic-acid complex or the user explicitly asks to split a complex into molecule-type parts.
+This tool requires an actual or likely protein-nucleic-acid complex; do not use it for protein-only binding-site prediction preparation unless the structure truly contains nucleic acid.
+Do not use this for ordinary single-chain extraction; use extract_fragment for a requested chain, or split_pdb_by_chain for per-chain files.
+Input pdb_path must be a file saved inside the current agent session.
+For binding-site prediction, split_complex alone may still leave multiple protein chains; extract_fragment may still be needed to obtain exactly one protein chain.
+"""
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "format"]
 [tools.parameters.properties.pdb_path]
 type = "string"
+description = "Absolute path to a session-local complex structure file."
 [tools.parameters.properties.format]
 type = "string"
 enum = ["cif", "pdb"]
-description = "File format of the input structure, pdb or cif."
+description = "Format of the input structure file. Match the file extension/path you pass."
 
 [[tools]]
 name = "extract_fragment"
 description = """
-Extract a chain fragment from a structure file.\
-To extract a whole chain, leave start and end as default.\
+Extract one chain or a residue range from a downloaded structure file.
+Use this when the user specifies a chain such as 'A chain' or 'chain A', or when a downstream tool requires a single chain.
+If start/end are omitted, the whole requested chain is extracted.
+This is the preferred preparation step before predict_binding_sites when the original structure has multiple chains or includes nucleic acid/ligands.
+Input pdb_path must be a session-local structure file. The output is a PDB file path that can be passed to downstream tools.
 """
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "chain", "format"]
 [tools.parameters.properties.pdb_path]
 type = "string"
+description = "Absolute path to a session-local structure file returned by download_pdb_file or another structure tool."
 [tools.parameters.properties.chain]
 type = "string"
+description = "Chain identifier to extract, e.g. 'A'. Use only the chain ID, not 'chain A'."
 [tools.parameters.properties.format]
 type = "string"
 enum = ["cif", "pdb"]
-description = "File format of the input structure, pdb or cif."
+description = "Format of the input structure file. Match the file extension/path you pass."
 [tools.parameters.properties.start]
 type = "integer"
-description = "1-based starting position in the chain. Default: start of chain"
+description = "Optional 1-based starting residue position in the chain. Omit to start from the beginning."
 [tools.parameters.properties.end]
 type = "integer"
-description = "1-based ending position in the chain. Default: end of chain"
+description = "Optional 1-based ending residue position in the chain. Omit to include through the end."
+
+[[tools]]
+name = "extract_sequences"
+description = """
+Extract polymer sequences from a downloaded PDB/mmCIF structure into a FASTA file, one record per chain.
+Use this when the user asks for chain sequences, FASTA output, or when a downstream sequence tool needs raw protein/nucleic-acid sequences but the user provided a structure file or PDB ID instead of sequences.
+For sequence interaction prediction without explicit sequences: download_pdb_file if needed, run extract_sequences, then read_result_file on the FASTA output. Choose the appropriate protein chain sequence and nucleic-acid chain sequence from the FASTA records before calling predict_interaction.
+Input pdb_path must be a session-local structure file. The FASTA format is records like '>{chain_id}' followed by the chain sequence.
+"""
+[tools.parameters]
+type = "object"
+required = ["pdb_path", "format"]
+[tools.parameters.properties.pdb_path]
+type = "string"
+description = "Absolute path to a session-local PDB/mmCIF structure file returned by download_pdb_file or upload."
+[tools.parameters.properties.format]
+type = "string"
+enum = ["cif", "pdb"]
+description = "Format of the input structure file. Match the file extension/path you pass."
 
 [[tools]]
 name = "calculate_contact_map"
 description = """
-Calculate contact map JSON from structure.\
-Output is a json file containing two keys:"axis" and "values".\
-"axis" is a list of residue identifiers (chain-residue number-residue name).\
-"values" is a list of upper triangular matrix values representing the contact map without diagonal elements, where the order corresponds to "axis".\
+Calculate a structural contact map from a downloaded structure or extracted chain.
+Use this when the user asks for a contact map, contact matrix, residue contact graph, or k-nearest-neighbor contact representation.
+Input pdb_path must be a session-local structure file. If the user asks for one chain and you have the full structure, either pass chain when supported or first use extract_fragment for a cleaner single-chain input.
+Default mode 'd' is distance-based. Use mode='knn' only if the user asks for k-nearest-neighbor contacts or provides k; include k when mode='knn'.
+The tool writes a JSON file; use read_result_file if you need to inspect or summarize its contents.
 """
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "format"]
 [tools.parameters.properties.pdb_path]
 type = "string"
+description = "Absolute path to a session-local structure file."
 [tools.parameters.properties.chain]
 type = "string"
+description = "Optional chain identifier, e.g. 'A'. Use when calculating contacts for one chain from a multi-chain file."
 [tools.parameters.properties.format]
 type = "string"
 enum = ["cif", "pdb"]
-description = "File format of the input structure, pdb or cif."
+description = "Format of the input structure file. Match the file extension/path you pass."
 [tools.parameters.properties.mode]
 type = "string"
 enum = ["d", "knn"]
-description = "Contact map calculation mode: distance-based (d) or k-nearest neighbors (knn). Default: d"
+description = "Contact map mode. Default: d for distance-based contacts. Use knn for k-nearest-neighbor contacts."
 [tools.parameters.properties.k]
 type = "integer"
-description = "Number of neighbors for knn mode. Required if mode=knn."
+description = "Number of neighbors for mode='knn'. Provide only with knn mode."
 
 [[tools]]
 name = "annotate_binding_pairs"
 description = """
-Annotate protein-nucleic acid binding residue pairs.\
-Output is a csv file with two clomns:"pair" and "distance".\
-"pair" is a string in the format of "chain1-resnum1-resname1_chain2-resnum2-resname2".\
+Annotate protein-nucleic-acid binding residue pairs in a downloaded complex structure.
+Use this for questions about contacts, interacting residue pairs, binding pairs, or distances between protein and DNA/RNA residues.
+Input should be a protein-nucleic-acid complex file, not a protein-only single chain. If the user provides only a PDB ID, download it first. If you are unsure whether it is a protein-nucleic-acid complex, use fetch_pdb_info first.
+This is an observed-contact annotation task, not a predictive binding-site scoring task. It only reports residue pairs within the distance cutoff.
+Do not use this for binding-site prediction scores; use predict_binding_sites for predicted DNA/RNA binding residues.
+The tool writes a CSV with columns 'pair' and 'distance'; call read_result_file to inspect and summarize the result.
 """
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "format"]
 [tools.parameters.properties.pdb_path]
 type = "string"
+description = "Absolute path to a session-local protein-nucleic-acid complex structure file."
 [tools.parameters.properties.format]
 type = "string"
 enum = ["cif", "pdb"]
-description = "File format of the input structure, pdb or cif."
+description = "Format of the input structure file. Match the file extension/path you pass."
 [tools.parameters.properties.cutoff]
 type = "number"
-description = "Cutoff distance for binding pair annotation. Default: 3.5"
+description = "Distance cutoff in Angstroms for binding-pair annotation. Default: 3.5."
 
 [[tools]]
 name = "predict_binding_sites"
 description = """
-Predict DNA/RNA binding sites using PSKit ai model.\
-Output is a csv file with four columns: chain,residue_number,residue_name,score.\
+Predict DNA- or RNA-binding site scores for a protein structure using the PSKit AI model.
+Critical input requirement: pdb_path must be a single protein chain file. Do not pass a full multichain complex, protein-nucleic-acid complex, nucleic-acid chain, or whole PDB entry.
+DNA-binding or RNA-binding means the ligand type to predict; the input structure itself does not need to contain DNA or RNA.
+Do not first require or verify that a PDB entry is a protein-DNA/RNA complex for this task. The correct preparation is to isolate the requested protein chain.
+If the user provides a PDB ID plus a chain, first download_pdb_file, then extract_fragment for that chain, then call predict_binding_sites on the extracted chain file.
+If the user provides a PDB ID without chain and the entry may contain multiple protein chains, ask for the chain or use metadata/splitting to identify the intended protein chain before prediction.
+If ligand_type is not specified, ask the user whether to predict DNA or RNA binding sites before calling this tool.
+After prediction, use read_result_file on the output CSV to summarize the highest-scoring residues.
 """
 [tools.parameters]
 type = "object"
 required = ["pdb_path", "ligand_type"]
 [tools.parameters.properties.pdb_path]
 type = "string"
-description = "Structure file path for input"
+description = "Absolute path to a session-local single protein chain structure file, usually produced by extract_fragment."
 [tools.parameters.properties.ligand_type]
 type = "string"
 enum = ["DNA", "RNA"]
+description = "Binding ligand type to predict. Must be DNA or RNA. Ask the user if unclear."
 
 [[tools]]
 name = "extract_empirical_features"
 description = """
-Extract empirical features including DSSP and Rosetta Score.\
-Dot not make rosetta relax unless user explicitly asks for it, as it can be time consuming.\
+Extract empirical structural features from a downloaded or extracted protein structure, including DSSP and optionally Rosetta scores.
+Use this when the user asks for structural features, DSSP, Rosetta score/features, or downstream modeling features.
+Input pdb_path must be a session-local structure file. If the user requests features for a specific chain, first use extract_fragment.
+Default emp_feats is 'dssp'. Use 'dssp,rosetta' only when Rosetta features are requested.
+Do not set rosetta_relax='true' unless the user explicitly asks for Rosetta relaxation, because it can be slow.
+Use read_result_file to inspect text/CSV outputs when needed.
 """
 [tools.parameters]
 type = "object"
 required = ["pdb_path"]
 [tools.parameters.properties.pdb_path]
 type = "string"
-description = "Structure file path for input"
+description = "Absolute path to a session-local structure file."
 [tools.parameters.properties.emp_feats]
 type = "string"
-description = "comma-separated features, including dssp and rosetta, e.g., 'dssp,rosetta'. Default: dssp"
+description = "Comma-separated features. Default: dssp. Example: 'dssp,rosetta'."
 [tools.parameters.properties.rosetta_relax]
 type = "string"
 enum = ["true", "false"]
-description = "Whether to relax the structure with Rosetta. Default: false"
+description = "Whether to run Rosetta relaxation. Default: false. Use true only if explicitly requested."
 
 [[tools]]
 name = "read_result_file"
-description = "Read a result text file with token-safe truncation (line range + char limit)."
+description = """
+Read a text result file produced inside the current agent session, with line and character limits.
+Use this after tools that write output files, such as predict_binding_sites, annotate_binding_pairs, calculate_contact_map, extract_sequences, or extract_empirical_features, when you need to inspect results before summarizing or reusing content.
+file_path must be an absolute path returned by a previous tool in this same agent session. Do not use this for arbitrary server files or URLs.
+For CSV result summaries, read from line 1 with enough max_lines/max_chars to include the header and important rows.
+"""
 [tools.parameters]
 type = "object"
 required = ["file_path"]
 [tools.parameters.properties.file_path]
 type = "string"
-description = "Path to result file. (Absolute path)"
+description = "Absolute path to a session-local text result file returned by a previous tool."
 [tools.parameters.properties.start_line]
 type = "integer"
-description = "1-based starting line number. Default: 1"
+description = "1-based starting line number. Default: 1."
 [tools.parameters.properties.max_lines]
 type = "integer"
-description = "Maximum number of lines to read. Default: 1000. Do not set below 1000 to avoid excessive truncation cutting key information. Max allowed is 5000."
+description = "Maximum lines to read. Default: 1000. Implementation clamps to 1..2000."
 [tools.parameters.properties.max_chars]
 type = "integer"
-description = "Maximum number of characters to return. Default: 12000. Do not set below 12000 to avoid excessive truncation cutting key information. Max allowed is 20000."
+description = "Maximum characters to return. Default: 12000. Implementation clamps to 200..120000."
 
 [[tools]]
 name = "predict_interaction"
-description = "Predict protein-nucleic acid interaction from sequence pairs."
+description = """
+Predict whether a protein sequence and a nucleic-acid sequence interact.
+Use this for sequence-based interaction prediction when you have both a protein sequence and a nucleic-acid sequence.
+If the user does not provide sequences but provides a PDB ID or structure file, use download_pdb_file if needed, then extract_sequences, then read_result_file to obtain chain sequences from FASTA before calling this tool.
+If the FASTA output contains multiple protein or nucleic-acid records and the intended pair is ambiguous, ask which chains to use instead of guessing.
+Do not use this for structure-based binding-site prediction or residue-level binding site scores; use predict_binding_sites for protein structure binding-site scores.
+Requires raw sequence strings, not file paths and not PDB IDs. Do not pass FASTA headers; pass only sequence letters.
+After prediction, use read_result_file if the tool output reports a result file path that needs inspection.
+"""
 [tools.parameters]
 type = "object"
 required = ["protein_seq", "nucleic_acid_seq"]
 [tools.parameters.properties.protein_seq]
 type = "string"
+description = "Protein amino-acid sequence as a raw one-letter sequence string."
 [tools.parameters.properties.nucleic_acid_seq]
 type = "string"
+description = "DNA or RNA sequence as a raw nucleotide sequence string."

@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path as PathExtractor, Query},
+    extract::{Multipart, Path as PathExtractor, Query},
     http::{StatusCode, header::CONTENT_TYPE},
     response::Response,
 };
@@ -20,6 +20,21 @@ struct AgentSessionFile {
     filename: String,
     size: u64,
     download_url: String,
+}
+
+#[derive(Serialize)]
+pub struct AgentUploadedFile {
+    path: String,
+    absolute_path: String,
+    filename: String,
+    size: u64,
+    download_url: String,
+}
+
+#[derive(Serialize)]
+pub struct AgentUploadFilesResponse {
+    session_id: String,
+    files: Vec<AgentUploadedFile>,
 }
 
 #[derive(Serialize)]
@@ -54,12 +69,36 @@ fn is_valid_filename(filename: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
 }
 
+fn is_allowed_structure_filename(filename: &str) -> bool {
+    is_valid_filename(filename)
+        && matches!(
+            Path::new(filename)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_ascii_lowercase())
+                .as_deref(),
+            Some("cif") | Some("pdb")
+        )
+}
+
+pub fn is_valid_session_id(session_id: &str) -> bool {
+    !session_id.is_empty()
+        && session_id.len() <= 128
+        && session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 pub fn build_session_dir(home: &Path, session_id: &str) -> PathBuf {
     home.join("tasks").join("agent_sessions").join(session_id)
 }
 
 pub fn history_file(session_dir: &Path) -> PathBuf {
     session_dir.join("history.json")
+}
+
+pub fn ui_history_file(session_dir: &Path) -> PathBuf {
+    session_dir.join("ui_history.json")
 }
 
 pub async fn read_history(history_file: &Path) -> Result<Vec<Value>, String> {
@@ -78,9 +117,13 @@ pub async fn read_history(history_file: &Path) -> Result<Vec<Value>, String> {
 pub async fn write_history(history_file: &Path, history: &[Value]) -> Result<(), String> {
     let history_json = serde_json::to_string_pretty(history)
         .map_err(|e| format!("Failed to serialize history: {}", e))?;
-    tokio::fs::write(history_file, history_json)
+    let tmp_file = history_file.with_extension(format!("json.tmp-{}", uuid::Uuid::new_v4()));
+    tokio::fs::write(&tmp_file, history_json)
         .await
-        .map_err(|e| format!("Failed to write history: {}", e))
+        .map_err(|e| format!("Failed to write history temp file: {}", e))?;
+    tokio::fs::rename(&tmp_file, history_file)
+        .await
+        .map_err(|e| format!("Failed to replace history file: {}", e))
 }
 
 pub async fn collect_session_files(session_dir: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
@@ -170,6 +213,10 @@ pub async fn list_session_files(
     PathExtractor(session_id): PathExtractor<String>,
     Query(query): Query<ListSessionFilesQuery>,
 ) -> Result<Json<AgentSessionFilesResponse>, (StatusCode, String)> {
+    if !is_valid_session_id(&session_id) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid session_id".to_string()));
+    }
+
     let home = crate::config::Config::home();
     let session_dir = build_session_dir(&home, &session_id);
 
@@ -246,9 +293,78 @@ pub async fn list_session_files(
     }))
 }
 
+pub async fn upload_session_files(
+    PathExtractor(session_id): PathExtractor<String>,
+    mut multipart: Multipart,
+) -> Result<Json<AgentUploadFilesResponse>, (StatusCode, String)> {
+    if !is_valid_session_id(&session_id) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid session_id".to_string()));
+    }
+
+    let home = crate::config::Config::home();
+    let session_dir = build_session_dir(&home, &session_id);
+    let upload_dir = session_dir.join("uploads");
+    tokio::fs::create_dir_all(&upload_dir)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut files = Vec::new();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
+    {
+        let Some(filename) = field.file_name().map(|s| s.to_string()) else {
+            continue;
+        };
+        if !is_allowed_structure_filename(&filename) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Invalid structure filename '{}'. Only .cif and .pdb are allowed.",
+                    filename
+                ),
+            ));
+        }
+
+        let data = field
+            .bytes()
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        let file_path = upload_dir.join(&filename);
+        tokio::fs::write(&file_path, &data)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let absolute_path = tokio::fs::canonicalize(&file_path)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let relative_path = format!("uploads/{}", filename);
+        let download_url = format!("/api/agent/sessions/{}/uploads/{}", session_id, filename);
+
+        files.push(AgentUploadedFile {
+            path: relative_path,
+            absolute_path: absolute_path.to_string_lossy().to_string(),
+            filename,
+            size: data.len() as u64,
+            download_url,
+        });
+    }
+
+    if files.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "No files uploaded".to_string()));
+    }
+
+    Ok(Json(AgentUploadFilesResponse { session_id, files }))
+}
+
 pub async fn download_session_tool_file(
     PathExtractor((session_id, tool_call_id, filename)): PathExtractor<(String, String, String)>,
 ) -> Result<Response, (StatusCode, String)> {
+    if !is_valid_session_id(&session_id) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid session_id".to_string()));
+    }
     if !is_valid_tool_call_id(&tool_call_id) {
         return Err((StatusCode::BAD_REQUEST, "Invalid tool_call_id".to_string()));
     }
@@ -275,9 +391,18 @@ pub async fn download_session_tool_file(
 pub async fn get_session_history(
     PathExtractor(session_id): PathExtractor<String>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    if !is_valid_session_id(&session_id) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid session_id".to_string()));
+    }
+
     let home = crate::config::Config::home();
     let session_dir = build_session_dir(&home, &session_id);
-    let history_file = history_file(&session_dir);
+    let ui_history_file = ui_history_file(&session_dir);
+    let history_file = if ui_history_file.exists() {
+        ui_history_file
+    } else {
+        history_file(&session_dir)
+    };
     let history = read_history(&history_file)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -288,6 +413,10 @@ pub async fn get_session_history(
 pub async fn delete_session(
     PathExtractor(session_id): PathExtractor<String>,
 ) -> Result<Json<DeleteSessionResponse>, (StatusCode, String)> {
+    if !is_valid_session_id(&session_id) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid session_id".to_string()));
+    }
+
     let home = crate::config::Config::home();
     let session_dir = build_session_dir(&home, &session_id);
 

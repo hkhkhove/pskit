@@ -4,7 +4,7 @@ import os
 import traceback
 import shutil
 import warnings
-
+from transformers.utils import logging
 import torch
 
 from .feature.extract import run as extract_feats
@@ -13,6 +13,7 @@ from .model.INAB import INAB
 from .utils import read_structure, is_protein_chain, has_protein_chain
 
 torch.set_grad_enabled(False)
+logging.set_verbosity_error()
 warnings.filterwarnings("ignore")
 
 
@@ -92,6 +93,8 @@ def agent_run(pdb_file, output_dir, target_type):
                 f.write("chain,residue_number,residue_name,score\n")
                 for res_name, score in zip(seq, output):
                     f.write(f"{res_name},{round(score, 4)}\n")
+
+            os.remove(pkl_file)
 
         except Exception as e:
             return f"{pdb_file}: {str(e)}\n{traceback.format_exc()}"

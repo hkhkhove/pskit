@@ -27,6 +27,12 @@ const MOLSTAR_COLORS = {
     nonBinding: { r: 52, g: 152, b: 219 },
 };
 
+const SCORE_GRADIENT_STOPS = [
+    { r: 37, g: 99, b: 235 },
+    { r: 245, g: 158, b: 11 },
+    { r: 220, g: 38, b: 38 },
+];
+
 const has_results = computed(() => parsedResultsAll.value.length > 0);
 const has_multiple_results = computed(() => parsedResultsAll.value.length > 1);
 
@@ -43,6 +49,34 @@ const current_title = computed(() => {
 });
 
 const bindingSiteCount = computed(() => current_result.value?.predictions.filter((r) => r.prediction === 1).length || 0);
+
+function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+}
+
+function mix(a, b, t) {
+    return Math.round(a + (b - a) * clamp01(t));
+}
+
+function scoreColor(score) {
+    const t = clamp01(score);
+    if (t <= 0.5) {
+        const p = t / 0.5;
+        return {
+            r: mix(SCORE_GRADIENT_STOPS[0].r, SCORE_GRADIENT_STOPS[1].r, p),
+            g: mix(SCORE_GRADIENT_STOPS[0].g, SCORE_GRADIENT_STOPS[1].g, p),
+            b: mix(SCORE_GRADIENT_STOPS[0].b, SCORE_GRADIENT_STOPS[1].b, p),
+        };
+    }
+
+    const p = (t - 0.5) / 0.5;
+    return {
+        r: mix(SCORE_GRADIENT_STOPS[1].r, SCORE_GRADIENT_STOPS[2].r, p),
+        g: mix(SCORE_GRADIENT_STOPS[1].g, SCORE_GRADIENT_STOPS[2].g, p),
+        b: mix(SCORE_GRADIENT_STOPS[1].b, SCORE_GRADIENT_STOPS[2].b, p),
+    };
+}
 
 async function switchToCurrentResult() {
     const res = current_result.value;
@@ -203,10 +237,14 @@ async function renderStructureWithPredictions() {
         await renderPdbeMolstar(viewerInstance, viewerContainer.value, options);
         await waitForStructureReady(viewerInstance);
 
-        const bindingResidues = parsedPredictions.value.filter((r) => r.prediction === 1).map((r) => ({ auth_asym_id: r.chain, auth_residue_number: r.resNum, color: MOLSTAR_COLORS.binding }));
+        const scoredResidues = parsedPredictions.value.map((r) => ({
+            auth_asym_id: r.chain,
+            auth_residue_number: r.resNum,
+            color: scoreColor(r.score),
+        }));
 
-        if (bindingResidues.length > 0) {
-            await applySelectionWithRetry(viewerInstance, { data: bindingResidues, nonSelectedColor: MOLSTAR_COLORS.nonSelected, focus: false, keepRepresentations: true });
+        if (scoredResidues.length > 0) {
+            await applySelectionWithRetry(viewerInstance, { data: scoredResidues, nonSelectedColor: MOLSTAR_COLORS.nonSelected, focus: false, keepRepresentations: true });
         }
     } catch (e) {
         console.error(e);
@@ -235,7 +273,8 @@ async function handleSubmit() {
 }
 </script>
 <template>
-    <TaskLayout title="Nucleic-acid Binding Site Prediction" :processing="isLoading" :errorMessage="submissionError" :isTaskView="is_task_view" :isResultsView="is_results_view" :showResults="showResults" @submit="handleSubmit">
+    <TaskLayout title="Nucleic-acid Binding Site Prediction" :processing="isLoading" :errorMessage="submissionError"
+        :isTaskView="is_task_view" :isResultsView="is_results_view" :showResults="showResults" @submit="handleSubmit">
         <template #input>
             <InputStructure v-model:input_method="input_method" v-model:ids="ids" v-model:files="files" />
         </template>
@@ -245,36 +284,46 @@ async function handleSubmit() {
                 <span class="text-xl font-semibold text-gray-900 dark:text-gray-400">Ligand Type</span>
             </div>
             <div>
-                <ul class="w-full items-center rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-900 sm:flex dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+                <ul
+                    class="w-full items-center rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-900 sm:flex dark:border-gray-600 dark:bg-gray-700 dark:text-white">
                     <li class="w-full border-b border-gray-300 sm:border-r sm:border-b-0 dark:border-gray-600">
                         <div class="flex items-center ps-3">
-                            <input id="DNA" type="radio" value="DNA" v-model="ligand_type" class="h-4 w-4 accent-blue-600" />
+                            <input id="DNA" type="radio" value="DNA" v-model="ligand_type"
+                                class="h-4 w-4 accent-blue-600" />
                             <label for="DNA" class="ms-2 w-full py-3">
                                 <span class="text-sm font-medium text-gray-900 dark:text-gray-300">DNA</span>
-                                <span class="text-xs text-gray-500 dark:text-gray-400 block">Predict DNA-binding residues</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400 block">Predict DNA-binding
+                                    residues</span>
                             </label>
                         </div>
                     </li>
                     <li class="w-full border-gray-300 dark:border-gray-600">
                         <div class="flex items-center ps-3">
-                            <input id="RNA" type="radio" value="RNA" v-model="ligand_type" class="h-4 w-4 accent-blue-600" />
+                            <input id="RNA" type="radio" value="RNA" v-model="ligand_type"
+                                class="h-4 w-4 accent-blue-600" />
                             <label for="RNA" class="ms-2 w-full py-3">
                                 <span class="text-sm font-medium text-gray-900 dark:text-gray-300">RNA</span>
-                                <span class="text-xs text-gray-500 dark:text-gray-400 block">Predict RNA-binding residues</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400 block">Predict RNA-binding
+                                    residues</span>
                             </label>
                         </div>
                     </li>
                 </ul>
                 <ul class="mt-4 text-sm dark:text-gray-500 space-y-1.5 list-disc list-inside">
-                    <li class="text-xs text-gray-500 dark:text-gray-300">Input files must contain a single protein chain. <span class="font-bold">If multiple chains are present, only the first one will be processed.</span></li>
-                    <li class="text-xs text-gray-500 dark:text-gray-300">Output CSV file contains binding scores for each residue.</li>
-                    <li class="text-xs text-gray-500 dark:text-gray-300">Prediction requires extracting features first, which may take some time.</li>
+                    <li class="text-xs text-gray-500 dark:text-gray-300">Input files must contain a single protein
+                        chain. <span class="font-bold">If multiple chains are present, only the first one will be
+                            processed.</span></li>
+                    <li class="text-xs text-gray-500 dark:text-gray-300">Output CSV file contains binding scores for
+                        each residue.</li>
+                    <li class="text-xs text-gray-500 dark:text-gray-300">Prediction requires extracting features first,
+                        which may take some time.</li>
                 </ul>
             </div>
         </template>
 
         <template #status>
-            <TaskStatus :task-id="task_id" task-name="Nucleic-acid Binding Site Prediction" @completed="handleTaskCompleted" @failed="handleTaskFailed" />
+            <TaskStatus :task-id="task_id" task-name="Nucleic-acid Binding Site Prediction"
+                @completed="handleTaskCompleted" @failed="handleTaskFailed" />
         </template>
 
         <template #viewer>
@@ -282,30 +331,31 @@ async function handleSubmit() {
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Structure</p>
             </div>
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
-            <div v-if="parsedPredictions.length > 0" class="w-full h-[720px] relative rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div v-if="parsedPredictions.length > 0"
+                class="w-full h-[720px] relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div ref="viewerContainer" class="w-full h-full relative z-50"></div>
-                <div v-if="isStructureLoading" class="absolute inset-0 z-[60] flex items-center justify-center bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
-                    <div class="flex flex-col items-center gap-3">
-                        <svg class="animate-spin h-10 w-10 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                <div v-if="isStructureLoading"
+                    class="absolute inset-0 z-[60] flex items-center justify-center bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm">
+                    <div
+                        class="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                        <svg class="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none"
+                            viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
                         </svg>
-                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Loading structure...</span>
+                        Loading structure
                     </div>
                 </div>
             </div>
-            <div v-if="parsedPredictions.length > 0" class="mt-4 flex items-center justify-center gap-4 text-sm">
+            <div v-if="parsedPredictions.length > 0"
+                class="mt-3 flex flex-wrap items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
                 <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded" style="background-color: rgb(231, 76, 60)"></div>
-                    <span class="text-gray-700 dark:text-gray-300">Binding Site</span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded" style="background-color: rgb(190, 190, 190)"></div>
-                    <span class="text-gray-700 dark:text-gray-300">Non-binding</span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <div class="w-4 h-4 rounded" style="background-color: rgb(255, 235, 59)"></div>
-                    <span class="text-gray-700 dark:text-gray-300">Selected</span>
+                    <span>Low score</span>
+                    <span class="h-2 w-24 rounded-full score-gradient"></span>
+                    <span>High score</span>
                 </div>
             </div>
         </template>
@@ -314,44 +364,71 @@ async function handleSubmit() {
             <div class="flex items-center justify-between gap-3">
                 <p class="text-3xl font-semibold text-gray-900 dark:text-gray-400">Predictions</p>
                 <div class="flex items-center gap-2">
-                    <button v-if="has_multiple_results" class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="isLoading" @click="nextTable">Next</button>
-                    <button class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="isLoading" @click="triggerDownloadAll">Download All</button>
+                    <button v-if="has_multiple_results"
+                        class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                        :disabled="isLoading" @click="nextTable">Next</button>
+                    <button
+                        class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                        :disabled="isLoading" @click="triggerDownloadAll">Download All</button>
                 </div>
             </div>
             <hr class="h-px my-4 bg-gray-200 border-0 dark:bg-gray-700" />
-            <div v-if="parsedPredictions.length > 0" class="flex flex-col h-[720px] rounded-lg border border-gray-200 dark:border-gray-700">
+            <div v-if="parsedPredictions.length > 0"
+                class="flex flex-col h-[720px] rounded-lg border border-gray-200 dark:border-gray-700">
                 <div class="flex justify-between items-center mb-2 px-3 pt-3">
                     <div class="space-y-1">
                         <div class="text-sm font-semibold text-gray-900 dark:text-gray-200">{{ current_title }}</div>
-                        <div class="text-xs text-gray-500 dark:text-gray-300">{{ bindingSiteCount }} binding sites found</div>
+                        <div class="text-xs text-gray-500 dark:text-gray-300">{{ bindingSiteCount }} binding sites found
+                        </div>
                     </div>
-                    <button class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600" :disabled="isLoading" @click="downloadCurrentTable">Download (CSV)</button>
+                    <button
+                        class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+                        :disabled="isLoading" @click="downloadCurrentTable">Download (CSV)</button>
                 </div>
                 <div class="max-h-screen overflow-y-auto">
                     <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                         <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
                             <tr>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">#</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">Chain</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">Residue</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">AA</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">Score</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">Prediction</th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">#
+                                </th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    Chain</th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    Residue</th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    AA</th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    Score</th>
+                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    Prediction</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                            <tr v-for="(r, idx) in parsedPredictions" :key="idx" class="cursor-pointer transition-colors" :class="idx === selectedRowIndex ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-blue-400/60 ring-inset' : r.prediction === 1 ? 'bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30' : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'" @click="focusResidue(r, idx)">
+                            <tr v-for="(r, idx) in parsedPredictions" :key="idx"
+                                class="cursor-pointer transition-colors"
+                                :class="idx === selectedRowIndex ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-blue-400/60 ring-inset' : r.prediction === 1 ? 'bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30' : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'"
+                                @click="focusResidue(r, idx)">
                                 <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300">{{ idx + 1 }}</td>
-                                <td class="px-4 py-2 text-xs font-mono text-gray-900 dark:text-gray-200">{{ r.chain }}</td>
+                                <td class="px-4 py-2 text-xs font-mono text-gray-900 dark:text-gray-200">{{ r.chain }}
+                                </td>
                                 <td class="px-4 py-2 text-xs text-gray-900 dark:text-gray-200">{{ r.resNum }}</td>
-                                <td class="px-4 py-2 text-xs font-mono text-gray-900 dark:text-gray-200">{{ r.resName }}</td>
+                                <td class="px-4 py-2 text-xs font-mono text-gray-900 dark:text-gray-200">{{ r.resName }}
+                                </td>
                                 <td class="px-4 py-2 text-xs text-gray-900 dark:text-gray-200">
                                     <div class="flex items-center gap-2">
-                                        <div class="w-16 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden"><div class="h-full rounded-full" :class="r.score > 0.4 ? 'bg-red-500' : 'bg-blue-500'" :style="{ width: `${Math.max(0, Math.min(1, r.score)) * 100}%` }"></div></div>
+                                        <div class="w-16 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                            <div class="h-full rounded-full"
+                                                :class="r.score > 0.4 ? 'bg-red-500' : 'bg-blue-500'"
+                                                :style="{ width: `${Math.max(0, Math.min(1, r.score)) * 100}%` }"></div>
+                                        </div>
                                         <span>{{ r.score.toFixed(3) }}</span>
                                     </div>
                                 </td>
-                                <td class="px-4 py-2 text-xs"><span v-if="r.prediction === 1" class="px-2 py-1 rounded-full bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300"> Binding </span><span v-else class="px-2 py-1 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400"> Non-binding </span></td>
+                                <td class="px-4 py-2 text-xs"><span v-if="r.prediction === 1"
+                                        class="px-2 py-1 rounded-full bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300">
+                                        Binding </span><span v-else
+                                        class="px-2 py-1 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                                        Non-binding </span></td>
                             </tr>
                         </tbody>
                     </table>
@@ -360,7 +437,8 @@ async function handleSubmit() {
             <div v-if="Object.keys(errorItems).length > 0" class="mt-6">
                 <h4 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-3">Processing Errors</h4>
                 <div class="space-y-2">
-                    <div v-for="(message, filename) in errorItems" :key="filename" class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+                    <div v-for="(message, filename) in errorItems" :key="filename"
+                        class="p-3 bg-red-50 border border-red-300 rounded-lg dark:bg-red-900/20 dark:border-red-800">
                         <p class="text-sm text-red-800 dark:text-red-300">
                             <span class="font-semibold">{{ filename }}:</span> {{ message }}
                         </p>
@@ -370,3 +448,9 @@ async function handleSubmit() {
         </template>
     </TaskLayout>
 </template>
+
+<style scoped>
+.score-gradient {
+    background: linear-gradient(90deg, rgb(37, 99, 235), rgb(245, 158, 11), rgb(220, 38, 38));
+}
+</style>

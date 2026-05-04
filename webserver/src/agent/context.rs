@@ -1,4 +1,5 @@
 use crate::agent::utils::truncate_text;
+use std::collections::HashSet;
 
 pub const SUMMARY_MARKER: &str = "[[SESSION_SUMMARY]]";
 
@@ -44,7 +45,9 @@ pub fn build_context_history(
         .filter_map(|(idx, msg)| (get_role(msg) == Some("user")).then_some(idx))
         .collect::<Vec<_>>();
 
-    let start_idx = if user_indices.len() > recent_user_turns_window {
+    let start_idx = if recent_user_turns_window == 0 {
+        history.len()
+    } else if user_indices.len() > recent_user_turns_window {
         user_indices[user_indices.len() - recent_user_turns_window]
     } else {
         0
@@ -73,6 +76,74 @@ pub fn build_context_history(
     }
 
     context
+}
+
+pub fn validate_message_sequence(messages: &[serde_json::Value]) -> Result<(), String> {
+    let mut expected_tool_ids: Option<HashSet<String>> = None;
+
+    for (idx, msg) in messages.iter().enumerate() {
+        let role = get_role(msg).unwrap_or_default();
+
+        if role == "tool" {
+            let tool_call_id = msg
+                .get("tool_call_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let Some(expected) = expected_tool_ids.as_mut() else {
+                return Err(format!(
+                    "tool message at index {} has no preceding tool_calls",
+                    idx
+                ));
+            };
+            if !expected.remove(tool_call_id) {
+                return Err(format!(
+                    "tool message at index {} has unexpected tool_call_id '{}'",
+                    idx, tool_call_id
+                ));
+            }
+            continue;
+        }
+
+        if let Some(expected) = &expected_tool_ids
+            && !expected.is_empty()
+        {
+            return Err(format!(
+                "assistant tool_calls before index {} are missing tool results: {:?}",
+                idx, expected
+            ));
+        }
+        expected_tool_ids = None;
+
+        if role == "assistant"
+            && let Some(tool_calls) = msg.get("tool_calls").and_then(|v| v.as_array())
+            && !tool_calls.is_empty()
+        {
+            let ids = tool_calls
+                .iter()
+                .filter_map(|tc| tc.get("id").and_then(|v| v.as_str()))
+                .filter(|id| !id.is_empty())
+                .map(|id| id.to_string())
+                .collect::<HashSet<_>>();
+            if ids.len() != tool_calls.len() {
+                return Err(format!(
+                    "assistant tool_calls at index {} contain empty or duplicate ids",
+                    idx
+                ));
+            }
+            expected_tool_ids = Some(ids);
+        }
+    }
+
+    if let Some(expected) = expected_tool_ids
+        && !expected.is_empty()
+    {
+        return Err(format!(
+            "assistant tool_calls at end of messages are missing tool results: {:?}",
+            expected
+        ));
+    }
+
+    Ok(())
 }
 
 pub fn build_history_for_summary(history: &[serde_json::Value]) -> String {

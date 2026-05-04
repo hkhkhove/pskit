@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use pskit_core::{annotate, contact, split};
+use pskit_core::{annotate, contact, split, utils};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs::File;
@@ -34,6 +34,12 @@ impl FormatArg {
 enum ContactMode {
     D,
     Knn,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum SequenceOutputFormat {
+    Fasta,
+    Json,
 }
 
 #[derive(Parser, Debug)]
@@ -79,6 +85,16 @@ enum Commands {
         end: Option<isize>,
         #[arg(short, long)]
         output: PathBuf,
+    },
+    ExtractSequences {
+        #[arg(short, long)]
+        input: PathBuf,
+        #[arg(short = 'F', long, value_enum, default_value_t = FormatArg::Auto)]
+        format: FormatArg,
+        #[arg(short, long)]
+        output: PathBuf,
+        #[arg(short = 'O', long, value_enum, default_value_t = SequenceOutputFormat::Fasta)]
+        output_format: SequenceOutputFormat,
     },
     ContactMap {
         #[arg(short, long)]
@@ -159,6 +175,23 @@ fn run() -> Result<(), String> {
             println!("written: {}", output.display());
             Ok(())
         }
+        Commands::ExtractSequences {
+            input,
+            format,
+            output,
+            output_format,
+        } => {
+            let reader = open_reader(&input)?;
+            let sequences = utils::extract_sequences(reader, format.as_core_format())?;
+            let content = match output_format {
+                SequenceOutputFormat::Fasta => render_fasta(&sequences),
+                SequenceOutputFormat::Json => serde_json::to_vec_pretty(&sequences)
+                    .map_err(|e| format!("serialize sequences failed: {e}"))?,
+            };
+            write_bytes(&output, &content)?;
+            println!("written: {}", output.display());
+            Ok(())
+        }
         Commands::ContactMap {
             input,
             format,
@@ -168,18 +201,13 @@ fn run() -> Result<(), String> {
             k,
         } => {
             let reader = open_reader(&input)?;
-            let (axis, mut values) = match mode {
+            let (axis, values) = match mode {
                 ContactMode::D => contact::d_map(reader, chain, format.as_core_format())?,
                 ContactMode::Knn => {
                     let actual_k = k.ok_or_else(|| "--k is required for mode=knn".to_string())?;
                     contact::knn_map(reader, chain, actual_k, format.as_core_format())?
                 }
             };
-
-            values
-                .iter_mut()
-                .flatten()
-                .for_each(|v| *v = (*v * 1000.0).round() / 1000.0);
 
             let payload = ContactMapOutput { axis, values };
 
@@ -258,4 +286,18 @@ fn write_pairs_csv(path: &Path, pairs: &[(String, f64)]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn render_fasta(sequences: &std::collections::BTreeMap<String, String>) -> Vec<u8> {
+    let mut content = String::new();
+
+    for (chain_id, sequence) in sequences {
+        content.push('>');
+        content.push_str(chain_id);
+        content.push('\n');
+        content.push_str(sequence);
+        content.push('\n');
+    }
+
+    content.into_bytes()
 }
